@@ -1,0 +1,705 @@
+#ifndef SOUND_H__
+#define SOUND_H__
+
+
+#ifdef _DEBUG_
+#define SND_SAFETY_REPETITIONS	5			//Numero de repetições do som Safety Mode Alarm
+#else
+#define SND_SAFETY_REPETITIONS	3			//Numero de repetições do som Safety Mode Alarm
+#endif
+
+
+
+
+
+#define FREQ_HALF_NOTE_FACTOR 1.059463f
+
+#define	C0 	16.35f
+#define	Db0	C0*FREQ_HALF_NOTE_FACTOR
+#define	D0	Db0*FREQ_HALF_NOTE_FACTOR
+#define	Eb0	D0*FREQ_HALF_NOTE_FACTOR
+#define	E0	Eb0*FREQ_HALF_NOTE_FACTOR
+#define	F0	E0*FREQ_HALF_NOTE_FACTOR
+#define	Gb0	F0*FREQ_HALF_NOTE_FACTOR
+#define	G0	Gb0*FREQ_HALF_NOTE_FACTOR
+#define	Ab0	G0*FREQ_HALF_NOTE_FACTOR
+#define	A0	Ab0*FREQ_HALF_NOTE_FACTOR
+#define	Bb0	A0*FREQ_HALF_NOTE_FACTOR
+#define	B0	Bb0*FREQ_HALF_NOTE_FACTOR
+
+#define	C1	B0*FREQ_HALF_NOTE_FACTOR
+#define	Db1	C1*FREQ_HALF_NOTE_FACTOR
+#define	D1	Db1*FREQ_HALF_NOTE_FACTOR
+#define	Eb1	D1*FREQ_HALF_NOTE_FACTOR
+#define	E1	Eb1*FREQ_HALF_NOTE_FACTOR
+#define	F1	E1*FREQ_HALF_NOTE_FACTOR
+#define	Gb1	F1*FREQ_HALF_NOTE_FACTOR
+#define	G1	Gb1*FREQ_HALF_NOTE_FACTOR
+#define	Ab1	G1*FREQ_HALF_NOTE_FACTOR
+#define	A1	Ab1*FREQ_HALF_NOTE_FACTOR
+#define	Bb1	A1*FREQ_HALF_NOTE_FACTOR
+#define	B1	Bb1*FREQ_HALF_NOTE_FACTOR
+
+#define	C2	B1*FREQ_HALF_NOTE_FACTOR
+#define	Db2	C2*FREQ_HALF_NOTE_FACTOR
+#define	D2	Db2*FREQ_HALF_NOTE_FACTOR
+#define	Eb2	D2*FREQ_HALF_NOTE_FACTOR
+#define	E2	Eb2*FREQ_HALF_NOTE_FACTOR
+#define	F2	E2*FREQ_HALF_NOTE_FACTOR
+#define	Gb2	F2*FREQ_HALF_NOTE_FACTOR
+#define	G2	Gb2*FREQ_HALF_NOTE_FACTOR
+#define	Ab2	G2*FREQ_HALF_NOTE_FACTOR
+#define	A2	Ab2*FREQ_HALF_NOTE_FACTOR
+#define	Bb2	A2*FREQ_HALF_NOTE_FACTOR
+#define	B2	Bb2*FREQ_HALF_NOTE_FACTOR
+
+#define	C3	B2*FREQ_HALF_NOTE_FACTOR
+#define	Db3	C3*FREQ_HALF_NOTE_FACTOR
+#define	D3	Db3*FREQ_HALF_NOTE_FACTOR
+#define	Eb3	D3*FREQ_HALF_NOTE_FACTOR
+#define	E3	Eb3*FREQ_HALF_NOTE_FACTOR
+#define	F3	E3*FREQ_HALF_NOTE_FACTOR
+#define	Gb3	F3*FREQ_HALF_NOTE_FACTOR
+#define	G3	Gb3*FREQ_HALF_NOTE_FACTOR
+#define	Ab3	G3*FREQ_HALF_NOTE_FACTOR
+#define	A3	Ab3*FREQ_HALF_NOTE_FACTOR
+#define	Bb3	A3*FREQ_HALF_NOTE_FACTOR
+#define	B3	Bb3*FREQ_HALF_NOTE_FACTOR
+
+#define	C4	B3*FREQ_HALF_NOTE_FACTOR
+#define	Db4	C4*FREQ_HALF_NOTE_FACTOR
+#define	D4	Db4*FREQ_HALF_NOTE_FACTOR
+#define	Eb4	D4*FREQ_HALF_NOTE_FACTOR
+#define	E4	Eb4*FREQ_HALF_NOTE_FACTOR
+#define	F4	E4*FREQ_HALF_NOTE_FACTOR
+#define	Gb4	F4*FREQ_HALF_NOTE_FACTOR
+#define	G4	Gb4*FREQ_HALF_NOTE_FACTOR
+#define	Ab4	G4*FREQ_HALF_NOTE_FACTOR
+#define	A4	Ab4*FREQ_HALF_NOTE_FACTOR
+#define	Bb4	A4*FREQ_HALF_NOTE_FACTOR
+#define	B4	Bb4*FREQ_HALF_NOTE_FACTOR
+
+#define	C5	B4*FREQ_HALF_NOTE_FACTOR
+#define	Db5	C5*FREQ_HALF_NOTE_FACTOR
+#define	D5	Db5*FREQ_HALF_NOTE_FACTOR
+#define	Eb5	D5*FREQ_HALF_NOTE_FACTOR
+#define	E5	Eb5*FREQ_HALF_NOTE_FACTOR
+#define	F5	E5*FREQ_HALF_NOTE_FACTOR
+#define	Gb5	F5*FREQ_HALF_NOTE_FACTOR
+#define	G5	Gb5*FREQ_HALF_NOTE_FACTOR
+#define	Ab5	G5*FREQ_HALF_NOTE_FACTOR
+#define	A5	Ab5*FREQ_HALF_NOTE_FACTOR
+#define	Bb5	A5*FREQ_HALF_NOTE_FACTOR
+#define	B5	Bb5*FREQ_HALF_NOTE_FACTOR
+
+#define	C6	B5*FREQ_HALF_NOTE_FACTOR
+#define	Db6	C6*FREQ_HALF_NOTE_FACTOR
+#define	D6	Db6*FREQ_HALF_NOTE_FACTOR
+#define	Eb6	D6*FREQ_HALF_NOTE_FACTOR
+#define	E6	Eb6*FREQ_HALF_NOTE_FACTOR
+#define	F6	E6*FREQ_HALF_NOTE_FACTOR
+#define	Gb6	F6*FREQ_HALF_NOTE_FACTOR
+#define	G6	Gb6*FREQ_HALF_NOTE_FACTOR
+#define	Ab6	G6*FREQ_HALF_NOTE_FACTOR
+#define	A6	Ab6*FREQ_HALF_NOTE_FACTOR
+#define	Bb6	A6*FREQ_HALF_NOTE_FACTOR
+#define	B6	Bb6*FREQ_HALF_NOTE_FACTOR
+
+#define	C7	B6*FREQ_HALF_NOTE_FACTOR
+#define	Db7	C7*FREQ_HALF_NOTE_FACTOR
+#define	D7	Db7*FREQ_HALF_NOTE_FACTOR
+#define	Eb7	D7*FREQ_HALF_NOTE_FACTOR
+#define	E7	Eb7*FREQ_HALF_NOTE_FACTOR
+#define	F7	E7*FREQ_HALF_NOTE_FACTOR
+#define	Gb7	F7*FREQ_HALF_NOTE_FACTOR
+#define	G7	Gb7*FREQ_HALF_NOTE_FACTOR
+#define	Ab7	G7*FREQ_HALF_NOTE_FACTOR
+#define	A7	Ab7*FREQ_HALF_NOTE_FACTOR
+#define	Bb7	A7*FREQ_HALF_NOTE_FACTOR
+#define	B7	Bb7*FREQ_HALF_NOTE_FACTOR
+
+
+
+#define	C8	B7*FREQ_HALF_NOTE_FACTOR
+#define	Db8	C8*FREQ_HALF_NOTE_FACTOR
+#define	D8	Db8*FREQ_HALF_NOTE_FACTOR
+#define	Eb8	D8*FREQ_HALF_NOTE_FACTOR
+#define	E8	Eb8*FREQ_HALF_NOTE_FACTOR
+#define	F8	E8*FREQ_HALF_NOTE_FACTOR
+#define	Gb8	F8*FREQ_HALF_NOTE_FACTOR
+#define	G8	Gb8*FREQ_HALF_NOTE_FACTOR
+#define	Ab8	G8*FREQ_HALF_NOTE_FACTOR
+#define	A8	Ab8*FREQ_HALF_NOTE_FACTOR
+#define	Bb8	A8*FREQ_HALF_NOTE_FACTOR
+#define	B8	Bb8*FREQ_HALF_NOTE_FACTOR
+
+#define DO0		C0
+#define REb0	Db0
+#define RE0		D0
+#define MIb0	Eb0
+#define MI0		E0
+#define FA0		F0
+#define SOLb0	Gb0
+#define SOL0	G0
+#define LAb0	Ab0
+#define LA0		A0
+#define SIb0	Bb0
+#define SI0		B0
+
+
+
+#define DO1		C1
+#define REb1	Db1
+#define RE1		D1
+#define MIb1	Eb1
+#define MI1		E1
+#define FA1		F1
+#define SOLb1	Gb1
+#define SOL1	G1
+#define LAb1	Ab1
+#define LA1		A1
+#define SIb1	Bb1
+#define SI1		B1
+
+
+
+#define DO2		C2
+#define REb2	Db2
+#define RE2		D2
+#define MIb2	Eb2
+#define MI2		E2
+#define FA2		F2
+#define SOLb2	Gb2
+#define SOL2	G2
+#define LAb2	Ab2
+#define LA2		A2
+#define SIb2	Bb2
+#define SI2		B2
+
+#define DO3		C3
+#define REb3	Db3
+#define RE3		D3
+#define MIb3	Eb3
+#define MI3		E3
+#define FA3		F3
+#define SOLb3	Gb3
+#define SOL3	G3
+#define LAb3	Ab3
+#define LA3		A3
+#define SIb3	Bb3
+#define SI3		B3
+
+#define DO4		C4
+#define REb4	Db4
+#define RE4		D4
+#define MIb4	Eb4
+#define MI4		E4
+#define FA4		F4
+#define SOLb4	Gb4
+#define SOL4	G4
+#define LAb4	Ab4
+#define LA4		A4
+#define SIb4	Bb4
+#define SI4		B4
+
+
+
+#define DO5		C5
+#define REb5	Db5
+#define RE5		D5
+#define MIb5	Eb5
+#define MI5		E5
+#define FA5		F5
+#define SOLb5	Gb5
+#define SOL5	G5
+#define LAb5	Ab5
+#define LA5		A5
+#define SIb5	Bb5
+#define SI5		B5
+
+
+#define DO6		C6
+#define REb6	Db6
+#define RE6		D6
+#define MIb6	Eb6
+#define MI6		E6
+#define FA6		F6
+#define SOLb6	Gb6
+#define SOL6	G6
+#define LAb6	Ab6
+#define LA6		A6
+#define SIb6	Bb6
+#define SI6		B6
+
+
+#define DO7		C7
+#define REb7	Db7
+#define RE7		D7
+#define MIb7	Eb7
+#define MI7		E7
+#define FA7		F7
+#define SOLb7	Gb7
+#define SOL7	G7
+#define LAb7	Ab7
+#define LA7		A7
+#define SIb7	Bb7
+#define SI7		B7
+
+
+#define DO8		C8
+#define REb8	Db8
+#define RE8		D8
+#define MIb8	Eb8
+#define MI8		E8
+#define FA8		F8
+#define SOLb8	Gb8
+#define SOL8	G8
+#define LAb8	Ab8
+#define LA8		A8
+#define SIb8	Bb8
+#define SI8		B8
+
+// DURATION OF THE NOTES
+#define BPM 120    //  you can change this value changing all the others
+#define Q 60000/BPM //quarter 1/4
+#define E Q/2   //eighth 1/8
+#define S Q/4 // sixteenth 1/16
+#define W 4*Q // whole 4/4
+#define H 2*Q //half 2/4
+
+typedef enum
+{
+	BEEP_VOL_OFF,
+	BEEP_VOL_1,
+	BEEP_VOL_2,
+	BEEP_VOL_3
+} sound_volume_t;
+
+
+typedef enum
+{
+    SOUND_OFF_LED_OFF = 0,
+    SOUND_OFF_LED_ON,
+    SOUND_LED_INIT,
+    SOUND_LED_INIT_RUN,
+    SOUND_LED_ERROR,
+    SOUND_LED_ERROR_RUN,
+    SOUND_LED_FOUNDIT,
+    SOUND_LED_FOUNDIT_RUN,
+    SOUND_LED_CONNECTED,
+    SOUND_LED_CONNECTED_RUN,
+    SOUND_LED_BUTTON_PRESS,
+    SOUND_LED_TEST,
+    SOUND_LED_TEST_RUN,
+    SOUND_LED_SAFETY,
+    SOUND_LED_SAFETY_RUN
+
+} sound_led_indication_t;
+
+
+
+
+
+
+
+typedef struct
+{
+	float frequency_hz;
+	uint32_t duration_ms;
+} MELODY_NOTE;
+
+
+
+
+
+
+#define MELODY_FOUNDIT2_SIZE			65
+static const MELODY_NOTE melody_foundit2[MELODY_FOUNDIT2_SIZE]={
+																{DO5,125},
+																{REb5,125},
+																{MIb5,125},
+																{FA5,125},
+																{SOL5,125},
+																{FA5,62},
+																{0,62},
+
+																{MIb5,66},
+																{MIb5,59},
+																{MIb5,66},
+																{MIb5,59},
+																{LAb5,62},
+																{LAb5,62},
+																{0,125},
+
+																{FA5,62},
+																{FA5,62},
+																{0,125},
+
+																{DO5,62},
+																{DO5,62},
+																{DO5,62},
+																{DO5,62},
+																{0,256},
+
+																{DO6,125},
+																{REb6,125},////
+																{MIb6,125},////
+																{FA6,125},
+																{LAb5,125},
+																{FA5,62},
+																{0,62},
+
+																{MIb6,66},
+																{MIb6,59},
+																{MIb6,66},
+																{MIb6, 59},
+																{LAb6, 62},
+																{LAb6,62},
+																{0, 125},
+
+																{FA6,58},
+																{FA6,50},
+																{0,120},
+
+																{DO6,62},
+																{DO6,62},
+																{DO6,62},
+																{DO6,62},
+																{0,256},
+
+																{DO7,125},
+																{REb7,125},
+																{MIb7,125},
+																{FA7,125},
+																{LAb6,125},
+																{FA6,62},
+																{0,62},
+
+																{MIb7,66},
+																{MIb7,59},
+																{MIb7,66},
+																{MIb7, 59},
+																{LAb7, 62},
+																{LAb7,62},
+																{0,125},
+
+
+																{FA7,62},
+																{FA7,62},
+																{0,125},
+
+																{DO7,62},
+																{DO7,62},
+																{DO7,62},
+																{DO7,62}
+
+
+};
+
+#define MELODY_SAFETY_SIZE				8
+static const MELODY_NOTE melody_safety[MELODY_SAFETY_SIZE]={
+																{RE5,126},
+																{FA5,126},
+																{LA4,126},
+																{RE5,126},
+																{FA5,126},
+																{SOL5,126},
+																{LA5,126},
+																{DO6,126}
+
+
+};
+
+
+#define MELODY_BEETHOVEN_SIZE			17
+static const MELODY_NOTE melody_beethoven[MELODY_BEETHOVEN_SIZE]={
+																{A6,500},
+																{A6,500},
+																{B6,500},
+																{G6,500},
+																{A6,500},
+																{B6,200},
+																{C7,300},
+																{B6,500},
+																{G6,500},
+																{A6,500},
+																{B6,200},
+																{C7,300},
+																{B6,500},
+																{A6,500},
+																{G6,500},
+																{A6,500},
+																{D6,700}
+															};
+
+
+
+#define MELODY_TESTE_SIZE				38
+static const MELODY_NOTE melody_teste[MELODY_TESTE_SIZE]={
+															{DO5,	1000},
+															{REb5,	1000},
+															{RE5,	1000},
+															{MIb5,	1000},
+															{MI5,	1000},
+															{FA5,	1000},
+															{SOLb5,	1000},
+															{SOL5,	1000},
+															{LAb5,	1000},
+															{LA5,	1000},
+															{SIb5,	1000},
+															{SI5,	1000},
+															{0,		1000},
+
+															{DO6,	1000},
+															{REb6,	1000},
+															{RE6,	1000},
+															{MIb6,	1000},
+															{MI6,	1000},
+															{FA6,	1000},
+															{SOLb6,	1000},
+															{SOL6,	1000},
+															{LAb6,	1000},
+															{LA6,	1000},
+															{SIb6,	1000},
+															{SI6,	1000},
+															{0,		1000},
+															{DO7,	1000},
+															{REb7,	1000},
+															{RE7,	1000},
+															{MIb7,	1000},
+															{MI7,	1000},
+															{FA7,	1000},
+															{SOLb7,	1000},
+															{SOL7,	1000},
+															{LAb7,	1000},
+															{LA7,	1000},
+															{SIb7,	1000},
+															{SI7,	1000}
+														};
+
+
+
+#define MELODY_STARWARS_SIZE			70
+static const MELODY_NOTE melody_starwars[MELODY_STARWARS_SIZE]={
+															{LA5,Q},
+															{LA5,Q},
+															{LA5,Q},
+															{FA5,E+S},
+															{DO6,S},
+															{LA5,Q},
+															{FA5,E+S},
+															{LA5,H},
+															{MI6,Q},
+															{MI6,Q},
+															{MI6,Q},
+															{FA6,E+S},
+															{DO6,S},
+															{LA5,Q},
+															{FA5,E+S},
+															{DO6,S},
+															{LA5,H},
+															{LA6,Q},
+															{LA5,E+S},
+															{LA5,S},
+															{LA6,Q},
+															{LAb6,E+S},
+															{SOL6,S},
+															{SOLb6,S},
+															{MI6,S},
+															{FA6,E},
+															{0,E},
+															{SIb5,E},
+															{SIb6,Q},
+															{RE6,E+S},
+															{REb6,S},
+															{DO6,S},
+															{SI5,S},
+															{DO6,E},
+															{0,E},
+															{FA5,E},
+															{LAb5,Q},
+															{FA5,E+S},
+															{LA5,S},
+															{DO6,Q},
+															{LA5,E+S},
+															{DO6,S},
+															{MI6,H},
+															{LA6,Q},
+															{LA5,E+S},
+															{LA5,S},
+															{LA6,Q},
+															{LAb6,E+S},
+															{SOL6,S},
+															{SOLb6,S},
+															{SOL6,S},
+															{MI6,S},
+															{FA6,E},
+															{0,E},
+															{SIb5,E},
+															{SIb6,Q},
+															{RE6,E+S},
+															{REb6,S},
+															{DO6,S},
+															{SI5,S},
+															{DO6,E},
+															{0,E},
+															{FA5,E},
+															{LAb5,Q},
+															{FA5,E+S},
+															{DO6,S},
+															{LA5,Q},
+															{FA5,E+S},
+															{DO6,S},
+															{LA5,H},
+														};
+
+
+
+/*
+#define MELODY_SUPERMARIO_SIZE			78
+static const MELODY_NOTE melody_supermario[MELODY_SUPERMARIO_SIZE]={
+															  {E7,E+S},
+															  {E7,E+S},
+															  {0, E+S},
+															  {E7,E+S},
+															  {0, E+S},
+															  {C7,E+S},
+															  {E7,E+S},
+															  {0, E+S},
+															  {G7,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {G6,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {C7,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {G6,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {E6,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {A6,E+S},
+															  {0, E+S},
+															  {B6,E+S},
+															  {0, E+S},
+															  {Ab6,E+S},
+															  {A6, E+S},
+															  {0, E+S},
+															  {G6, E},
+															  {E7, E},
+															  {G7, E},
+															  {A7, E+S},
+															  {0, E+S},
+															  {F7, E+S},
+															  {G7, E+S},
+															  {0,  E+S},
+															  {E7, E+S},
+															  {0, E+S},
+															  {C7, E+S},
+															  {D7, E+S},
+															  {B6, E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {C7,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {G6,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {E6,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {A6,E+S},
+															  {0, E+S},
+															  {B6,E+S},
+															  {0, E+S},
+															  {Ab6,E+S},
+															  {A6, E+S},
+															  {0, E+S},
+															  {G6, E},
+															  {E7, E},
+															  {G7, E},
+															  {A7, E+S},
+															  {0, E+S},
+															  {F7, E+S},
+															  {G7, E+S},
+															  {0, E+S},
+															  {E7, E+S},
+															  {0, E+S},
+															  {C7, E+S},
+															  {D7, E+S},
+															  {B6, E+S},
+															  {0, E+S},
+															  {0,E+S}
+															};
+*/
+
+
+#define MELODY_SUPERMARIO_SIZE			16
+static const MELODY_NOTE melody_supermario[MELODY_SUPERMARIO_SIZE]={
+															  {E7,E+S},
+															  {E7,E+S},
+															  {0, E+S},
+															  {E7,E+S},
+															  {0, E+S},
+															  {C7,E+S},
+															  {E7,E+S},
+															  {0, E+S},
+															  {G7,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {G6,E+S},
+															  {0, E+S},
+															  {0, E+S},
+															  {0, E+S}
+																};
+#define MELODY_INIT_SIZE			3
+static const MELODY_NOTE melody_init[MELODY_INIT_SIZE]={
+																{DO6,100},
+																{0,50},
+																{DO7,300}
+																};
+
+
+
+
+
+#define MELODY_TEST_SIZE			1
+static const MELODY_NOTE melody_test[MELODY_TEST_SIZE]={
+																//{DO6,100},
+																//{0,50},
+																{DO7,500}
+																};
+
+
+#define MELODY_ERROR_SIZE			3
+static const MELODY_NOTE melody_error[MELODY_ERROR_SIZE]={
+																{DO7,100},
+																{0,50},
+																{DO5,350}
+																};
+
+
+
+bool melody_note_put(MELODY_NOTE note);
+bool melody_note_get(MELODY_NOTE *note);
+uint16_t melody_note_count(void);
+
+
+
+void beep_set_volume(sound_volume_t vol);
+float get_frequency(void);
+
+uint32_t sound_led_indication(sound_led_indication_t indication,sound_volume_t vol, bool led_on, uint16_t nrepetitions);
+
+bool sound_led_is_busy(void);
+
+#endif
+
+

@@ -1,0 +1,112 @@
+#ifndef TIMERS_H__
+#define TIMERS_H__
+#include "app_timer.h"
+
+
+#define APP_TIMER_PRESCALER             	0//32->(1ms) //3276->(100ms) 327->(10ms) 163->(5ms)   4095   /**< Value of the RTC1 PRESCALER register. */
+//#define APP_TIMER_MAX_TIMERS              	(19)                         /**< Maximum number of simultaneously created timers.*/
+																								//1 for Battery measurement,
+																								//1 for authentication Timeout
+																								//1 for safety mode
+																								//1 for sound_led,
+																								//1 for button_state
+																								//1 for button_char_update
+																								//1 for system off
+																								//1 for tx_power safety mode
+																								//1 for advertising2 start
+
+																								//1 for connection parameters module,
+																								//1 for BLE STACK
+																								//1 gpiote
+
+#define APP_TIMER_OP_QUEUE_SIZE          	19	//6                                                /**< Size of timer operation queues. */
+#define POFF_DEFAULT_TIMOUT					60000	//ms
+
+#define BATTERY_LEVEL_MEAS_INTERVAL       APP_TIMER_TICKS(120000, APP_TIMER_PRESCALER)      	/**< Battery level measurement interval (ticks). This value corresponds to 120 seconds. */
+//#define SAFETY_MODE_WAITING_INTERVAL 	 APP_TIMER_TICKS(14000, APP_TIMER_PRESCALER)	 		//7.1secs
+
+
+
+void timers_init(void);
+
+
+
+
+void timer_authentication_start(uint32_t time_ms);
+void timer_authentication_stop(void);
+void authentication_timeout_handler(void * p_context);
+
+void safety_mode_alarm_tout_start(uint32_t time_ms);
+void safety_mode_alarm_tout_stop(void);
+void timer_safety_alarm_tout_handler(void * p_context);
+
+void battery_timer_start(uint32_t timer);
+void battery_timer_stop(void);
+void battery_base_time_handler(void * p_context);
+
+void timer_beep_start(uint32_t time_ms);
+void timer_beep_stop(void);
+void timer_beep_handler(void * p_context);
+
+void timer_button_char_update_start(uint32_t time_ms);
+void timer_button_char_update_handler(void * p_context);
+void timer_button_adv_handler(void * p_context);
+
+void timer_button_state_start(uint32_t time_ms);
+void timer_button_state_stop(void);
+void timer_button_state_handler(void * p_context);
+
+void timer_poff_start(uint32_t time_ms);
+void timer_poff_stop(void);
+void timer_poff_handler(void * p_context);
+
+void timer_button_adv_start(uint32_t time_ms);
+void timer_button_adv_stop(void);
+
+void timer_safety_mode_tx_pwr_tout_start(uint32_t time_ms);
+void timer_safety_mode_tx_pwr_tout_stop(void);
+void timer_safety_mode_tx_pwr_tout_handler(void * p_context);
+
+void timer_adv2_start(uint32_t time_ms);
+void timer_adv2_stop(void);
+void timer_adv2_handler(void * p_context);
+
+void timer_safety_validation_start(uint32_t time_ms);
+void timer_safety_validation_stop(void);
+void timer_safety_validation_handler(void * p_context);
+
+void timer_safety_process_start(uint32_t time_ms);
+void timer_safety_process_stop(void);
+void timer_safety_process_handler(void * p_context);
+
+void timer_rssi_burst_start(uint32_t time_ms);
+void timer_rssi_burst_stop(void);
+void timer_rssi_burst_handler(void * p_context);
+
+void timer_safety_thread_start(uint32_t time_ms);
+void timer_safety_thread_stop(void);
+void timer_safety_thread_handler(void * p_context);
+
+void timer_rssi_thread_start(uint32_t time_ms);
+void timer_rssi_thread_stop(void);
+void timer_rssi_thread_handler(void * p_context);
+
+void timer_sfty_far_signaling_start(uint32_t time_ms);
+void timer_sfty_far_signaling_stop(void);
+void timer_sfty_far_signaling_handler(void * p_context);
+
+void timer_active_scan_start(uint32_t time_ms);
+void timer_active_scan_stop(void);
+void timer_active_scan_handler(void * p_context);
+
+#ifdef DEV_KIT
+void timer_tstamp_start(uint32_t time_ms);
+void timer_tstamp_stop(void);
+void timer_tstamp_handler(void * p_context);
+#endif
+
+void set_tout_ms(uint32_t *count,uint32_t tout_ms,uint32_t base_time_ms);
+uint32_t tout_run(uint32_t *count);
+
+#endif
+

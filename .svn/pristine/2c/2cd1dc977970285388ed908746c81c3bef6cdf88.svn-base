@@ -1,0 +1,802 @@
+/* Copyright (c) 2012 Nordic Semiconductor. All Rights Reserved.
+ *
+ * The information contained herein is property of Nordic Semiconductor ASA.
+ * Terms and conditions of usage are described in detail in NORDIC
+ * SEMICONDUCTOR STANDARD SOFTWARE LICENSE AGREEMENT.
+ *
+ * Licensees are granted free, non-transferable use of the information. NO
+ * WARRANTY of ANY KIND is provided. This heading must NOT be removed from
+ * the file.
+ *
+ */
+
+#include <string.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include "nordic_common.h"
+#include "ble_srv_common.h"
+#include "app_util.h"
+#include "nrf_soc.h"
+//#include "nrf_gpio.h"
+//#include "custom_board.h"
+
+#include "ble_beep.h"
+#include "ble.h"
+//#include "ble_srv_common.h"
+#include "ble_extra.h"
+#define INVALID_BATTERY_LEVEL  255
+
+
+ble_extra_t 	 m_extra;
+
+
+/**@brief Function for handling write events to the TX Power value.
+ *
+ * @param[in]   p_extra    BLE Settings Service structure.
+ * @param[in]   p_evt_write   Write event received from the BLE stack.
+ */
+static void on_connection_mode_write(ble_extra_t * p_extra, ble_gatts_evt_write_t * p_evt_write)
+{															
+   if ((p_evt_write->len >= 1) && (p_extra->evt_handler != NULL))
+   {
+	   ble_extra_evt_t evt;
+		  evt.evt_type = CHAR_CONNECTION_MODE;
+		 
+		  evt.max_connection_interval = ((((uint16_t)((uint8_t *)p_evt_write->data)[1]) << 0) |
+             (((uint16_t)((uint8_t *)p_evt_write->data)[0]) << 8 ));	
+  	  evt.tx_power_level = (uint8_t) p_evt_write->data[3];		 
+		 
+			p_extra->evt_handler(p_extra, &evt);        
+    }
+}
+
+/**@brief Function for handling write events to the TX Power value.
+ *
+ * @param[in]   p_extra    BLE Settings Service structure.
+ * @param[in]   p_evt_write   Write event received from the BLE stack.
+ */
+static void on_txpower_write(ble_extra_t * p_extra, ble_gatts_evt_write_t * p_evt_write)
+{
+   if ((p_evt_write->len >= 1) && (p_extra->evt_handler != NULL))
+   {
+	   ble_extra_evt_t evt;
+				
+				evt.evt_type           = CHAR_TX_POWER;
+        evt.tx_power_level = p_evt_write->data[0];
+
+        p_extra->evt_handler(p_extra, &evt);   
+    }
+}
+
+
+/**@brief Function for handling write events to the DFU value.
+ *
+ * @param[in]   p_extra    DFU Service structure.
+ * @param[in]   p_evt_write   Write event received from the BLE stack.
+ */
+static void on_dfu_lapa_dfu_lapa_write(ble_extra_t * p_dfu_lapa, ble_gatts_evt_write_t * p_evt_write)
+{															
+   if ((p_evt_write->len >= 1) && (p_dfu_lapa->evt_handler != NULL) && (p_evt_write->data[0] == 0x9D))
+   {
+	   ble_extra_evt_t evt;
+		  evt.evt_type = CHAR_BOOTLOADER;
+			
+			p_dfu_lapa->evt_handler(p_dfu_lapa, &evt);        
+    }
+}
+
+/**@brief Function for handling write events to the Advertising Interval Slow value.
+ *
+ * @param[in]   p_extra    BLE Settings Service structure.
+ * @param[in]   p_evt_write   Write event received from the BLE stack.
+ */
+static void on_advslow_interval_write(ble_extra_t * p_extra, ble_gatts_evt_write_t * p_evt_write)
+{
+   if ((p_evt_write->len >= 1) && (p_extra->evt_handler != NULL))
+   {
+	   ble_extra_evt_t evt;
+				
+				evt.evt_type           = CHAR_ADV_SLOW_INTERVAL;
+        evt.adv_interval_slow = (p_evt_write->data[0] << 8 | p_evt_write->data[1]);
+
+        p_extra->evt_handler(p_extra, &evt);        
+    }
+}
+
+
+/**@brief Function for handling write events to the Default Max Connection Interval value.
+ *
+ * @param[in]   p_extra    BLE Settings Service structure.
+ * @param[in]   p_evt_write   Write event received from the BLE stack.
+ */
+static void on_max_connection_interval_default_write(ble_extra_t * p_extra, ble_gatts_evt_write_t * p_evt_write)
+{
+   if ((p_evt_write->len > 1) && (p_extra->evt_handler != NULL))
+   {
+	   ble_extra_evt_t evt;
+				
+				evt.evt_type           = CHAR_MAX_CONN_INTERVAL;
+        evt.max_conn_interval_default = (p_evt_write->data[0] << 8 | p_evt_write->data[1]);
+		 
+        p_extra->evt_handler(p_extra, &evt);        
+    }
+}
+
+
+/**@brief Function for adding Beep characteristic.
+ *
+ * @param[in]   p_dfu_lapa        Beep Service structure.
+ * @param[in]   p_dfu_lapa_init   Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on success, otherwise an error code.
+ */
+static uint32_t dfu_lapa_activate_bootloader_char_add(ble_extra_t * p_dfu_lapa)
+{
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+		ble_uuid_t          char_uuid;
+    ble_gatts_attr_md_t attr_md;
+    
+    memset(&char_md, 0, sizeof(char_md));
+    
+    char_md.char_props.write = 1;
+    char_md.p_char_user_desc         = NULL;
+    char_md.p_char_pf                = NULL;
+    char_md.p_user_desc_md           = NULL;
+    char_md.p_cccd_md                = NULL;
+    char_md.p_sccd_md                = NULL;
+    
+	char_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    char_uuid.uuid = UUID_CHAR_BOOTLOADER;
+    sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+		    
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = 0;
+    attr_md.wr_auth    = 0;
+    attr_md.vlen       = 0;
+    
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+    
+    attr_char_value.p_uuid       = &char_uuid;
+    attr_char_value.p_attr_md    = &attr_md;
+    attr_char_value.init_len     = sizeof(uint8_t);
+    attr_char_value.init_offs    = 0;
+    attr_char_value.max_len      = sizeof(uint8_t);
+    
+    return sd_ble_gatts_characteristic_add(p_dfu_lapa->service_handle,
+                                           &char_md,
+                                           &attr_char_value,
+                                           &p_dfu_lapa->dfu_lapa_bootloader_handles);
+}
+
+static void on_connect(ble_extra_t * p_extra, ble_evt_t * p_ble_evt)
+{
+    p_extra->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
+}
+
+
+/**@brief Function for handling the Disconnect event.
+ *
+ * @param[in]   p_bas       Battery Service structure.
+ * @param[in]   p_ble_evt   Event received from the BLE stack.
+ */
+static void on_disconnect(ble_extra_t * p_extra, ble_evt_t * p_ble_evt)
+{
+    UNUSED_PARAMETER(p_ble_evt);
+    p_extra->conn_handle = BLE_CONN_HANDLE_INVALID;
+}
+
+
+/**@brief Function for handling the Write event.
+ *
+ * @param[in]   p_bas       Battery Service structure.
+ * @param[in]   p_ble_evt   Event received from the BLE stack.
+ */
+static void on_write(ble_extra_t * p_extra, ble_evt_t * p_ble_evt)
+{
+	
+	  ble_gatts_evt_write_t * p_evt_write = &p_ble_evt->evt.gatts_evt.params.write;
+	
+		//read event from mobile under the Beep Service
+		if (p_evt_write->handle == p_extra->dfu_lapa_bootloader_handles.value_handle)
+    {
+        on_dfu_lapa_dfu_lapa_write(p_extra, p_evt_write);
+    }
+		else if (p_evt_write->handle == p_extra->ble_extra_advslow_interval_handles.value_handle)
+    {
+        on_advslow_interval_write(p_extra, p_evt_write);
+    }
+		else if (p_evt_write->handle == p_extra->ble_extra_max_connection_interval_default_handles.value_handle)
+    {
+        on_max_connection_interval_default_write(p_extra, p_evt_write);
+    }
+		else if (p_evt_write->handle == p_extra->ble_extra_txpower_handles.value_handle)
+    {
+        on_txpower_write(p_extra, p_evt_write);
+    } 
+		else if (p_evt_write->handle == p_extra->ble_extra_connection_mode_handles.value_handle)
+    {
+        on_connection_mode_write(p_extra, p_evt_write);
+    }
+
+		if (p_extra->is_notification_supported)
+    {
+		p_evt_write = &p_ble_evt->evt.gatts_evt.params.write;
+		if ((p_evt_write->handle == p_extra->ble_extra_button_test_handles.cccd_handle) && (p_evt_write->len == 2))
+		{
+			// CCCD written, call application event handler
+			if (p_extra->evt_handler != NULL)
+			{
+				ble_extra_evt_t evt;
+				if (ble_srv_is_notification_enabled(p_evt_write->data))
+				{
+					evt.evt_type = CHAR_BUTTON_TEST_ENABLED;
+				}
+				else
+				{
+					evt.evt_type = CHAR_BUTTON_TEST_DISABLED;
+
+				}
+				p_extra->evt_handler(p_extra, &evt);
+			}
+		}
+    }
+}
+
+
+void ble_extra_on_ble_evt(ble_extra_t * p_extra, ble_evt_t * p_ble_evt)
+{
+    switch (p_ble_evt->header.evt_id)
+    {
+        case BLE_GAP_EVT_CONNECTED:
+            on_connect(p_extra, p_ble_evt);
+            break;
+            
+        case BLE_GAP_EVT_DISCONNECTED:
+            on_disconnect(p_extra, p_ble_evt);
+            break;
+            
+        case BLE_GATTS_EVT_WRITE:
+            on_write(p_extra, p_ble_evt);
+            break;
+						
+        default:
+            break;
+    }
+}
+
+
+
+/**@brief Function for adding Connection Mode Settings characteristics.
+ *
+ * @param[in]   p_extra        BLE Settings Service structure.
+ * @param[in]   p_settings_init   Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on success, otherwise an error code.
+ */
+static uint32_t settings_connection_mode_char_add(ble_extra_t * p_extra, const ble_extra_init_t * p_blesettings_init)
+{
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+    //ble_uuid_t          ble_uuid;
+		ble_uuid_t  char_uuid;
+    ble_gatts_attr_md_t attr_md;
+   // uint32_t err_code;
+    memset(&char_md, 0, sizeof(char_md));
+    
+    char_md.char_props.write = 1;
+	char_md.char_props.read   = 1;
+    char_md.p_char_user_desc         = NULL;
+    char_md.p_char_pf                = NULL;
+    char_md.p_user_desc_md           = NULL;
+    char_md.p_cccd_md                = NULL;
+    char_md.p_sccd_md                = NULL;
+    
+		char_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    char_uuid.uuid = UUID_CHAR_SETTINGS_CONNECTION_MODE;
+    //err_code = sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = 0;
+    attr_md.wr_auth    = 0;
+    attr_md.vlen       = 0;
+    
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+    
+    attr_char_value.p_uuid       = &char_uuid;
+    attr_char_value.p_attr_md    = &attr_md;
+    attr_char_value.init_len     = sizeof(uint32_t);
+    attr_char_value.init_offs    = 0;
+    attr_char_value.max_len      = sizeof(uint32_t);
+		attr_char_value.p_value      = (uint8_t*)&p_blesettings_init->initial_connection_mode;
+    
+    return sd_ble_gatts_characteristic_add(p_extra->service_handle,
+                                           &char_md,
+                                           &attr_char_value,
+                                           &p_extra->ble_extra_connection_mode_handles);
+}
+
+
+/**@brief Function for adding Advertising Interval Slow Settings characteristics.
+ *
+ * @param[in]   p_extra        BLE Settings Service structure.
+ * @param[in]   p_settings_init   Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on success, otherwise an error code.
+ */
+static uint32_t settings_advslow_interval_char_add(ble_extra_t * p_extra, const ble_extra_init_t * p_blesettings_init)
+{
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+		ble_uuid_t  char_uuid;
+    ble_gatts_attr_md_t attr_md;
+    //uint32_t err_code;
+    memset(&char_md, 0, sizeof(char_md));
+    
+    char_md.char_props.write = 1;
+		char_md.char_props.read   = 1;
+    char_md.p_char_user_desc         = NULL;
+    char_md.p_char_pf                = NULL;
+    char_md.p_user_desc_md           = NULL;
+    char_md.p_cccd_md                = NULL;
+    char_md.p_sccd_md                = NULL;
+    
+		char_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    char_uuid.uuid = UUID_CHAR_ADV_SLOW_INTERVAL;
+   // err_code = sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    //BLE_UUID_BLE_ASSIGN(ble_uuid, LAPA_UUID_SETTINGS_ADVSLOW_INTERVAL_CHAR);
+    
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = 0;
+    attr_md.wr_auth    = 0;
+    attr_md.vlen       = 0;
+    
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+    
+    attr_char_value.p_uuid       = &char_uuid;
+    attr_char_value.p_attr_md    = &attr_md;
+    attr_char_value.init_len     = sizeof(uint16_t);
+    attr_char_value.init_offs    = 0;
+    attr_char_value.max_len      = sizeof(uint16_t);
+		attr_char_value.p_value      = (uint8_t*)&p_blesettings_init->initial_advslow_interval;
+    
+    return sd_ble_gatts_characteristic_add(p_extra->service_handle,
+                                           &char_md,
+                                           &attr_char_value,
+                                           &p_extra->ble_extra_advslow_interval_handles);
+}
+
+/**@brief Function for adding Advertising Interval Slow Settings characteristics.
+ *
+ * @param[in]   p_extra        BLE Settings Service structure.
+ * @param[in]   p_settings_init   Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on success, otherwise an error code.
+ */
+static uint32_t settings_max_connection_interval_default_char_add(ble_extra_t * p_extra, const ble_extra_init_t * p_blesettings_init)
+{
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+		ble_uuid_t  char_uuid;
+    ble_gatts_attr_md_t attr_md;
+    //uint32_t err_code;
+    memset(&char_md, 0, sizeof(char_md));
+    
+    char_md.char_props.write = 1;
+		char_md.char_props.read   = 1;
+    char_md.p_char_user_desc         = NULL;
+    char_md.p_char_pf                = NULL;
+    char_md.p_user_desc_md           = NULL;
+    char_md.p_cccd_md                = NULL;
+    char_md.p_sccd_md                = NULL;
+    
+	char_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    char_uuid.uuid = UUID_CHAR_MAX_CONNECTION_INTERVAL;
+   // err_code = sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = 0;
+    attr_md.wr_auth    = 0;
+    attr_md.vlen       = 0;
+    
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+    
+    attr_char_value.p_uuid       = &char_uuid;
+    attr_char_value.p_attr_md    = &attr_md;
+    attr_char_value.init_len     = sizeof(uint16_t);
+    attr_char_value.init_offs    = 0;
+    attr_char_value.max_len      = sizeof(uint16_t);
+	attr_char_value.p_value      = NULL;//(uint8_t*)&p_ble_settings_init->initial_max_connection_interval_default;
+    
+    return sd_ble_gatts_characteristic_add(p_extra->service_handle,
+                                           &char_md,
+                                           &attr_char_value,
+                                           &p_extra->ble_extra_max_connection_interval_default_handles);
+}
+
+
+/**@brief Function for adding TXPower Settings characteristics.
+ *
+ * @param[in]   p_extra        BLE Settings Service structure.
+ * @param[in]   p_settings_init   Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on success, otherwise an error code.
+ */
+static uint32_t settings_txpower_char_add(ble_extra_t * p_extra, const ble_extra_init_t * p_extra_init)
+{
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+    //ble_uuid_t          ble_uuid;
+		ble_uuid_t  char_uuid;
+    ble_gatts_attr_md_t attr_md;
+    //uint32_t err_code;
+    memset(&char_md, 0, sizeof(char_md));
+    
+    char_md.char_props.write = 1;
+		char_md.char_props.read   = 1;
+    char_md.p_char_user_desc         = NULL;
+    char_md.p_char_pf                = NULL;
+    char_md.p_user_desc_md           = NULL;
+    char_md.p_cccd_md                = NULL;
+    char_md.p_sccd_md                = NULL;
+    
+		char_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    char_uuid.uuid = UUID_CHAR_SETTINGS_TX_POWER;
+    //err_code = sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    sd_ble_uuid_vs_add(&m_base_uuid128, &char_uuid.type);
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = 0;
+    attr_md.wr_auth    = 0;
+    attr_md.vlen       = 0;
+    
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+    
+    attr_char_value.p_uuid       = &char_uuid;
+    attr_char_value.p_attr_md    = &attr_md;
+    attr_char_value.init_len     = sizeof(uint8_t);
+    attr_char_value.init_offs    = 0;
+    attr_char_value.max_len      = sizeof(uint8_t);
+		attr_char_value.p_value      = (uint8_t*)&p_extra_init->initial_tx_power_level;
+    
+    return sd_ble_gatts_characteristic_add(p_extra->service_handle,
+                                           &char_md,
+                                           &attr_char_value,
+                                           &p_extra->ble_extra_txpower_handles);
+}
+
+
+///
+/**@brief Function for adding BUTTON Settings characteristics.
+ *
+ * @param[in]   p_settings        BLE Settings Service structure.
+ * @param[in]   p_settings_init   Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on success, otherwise an error code.
+ */
+static uint32_t ble_extra_button_test_char_add(ble_extra_t * p_extra, const ble_extra_init_t * p_extra_init)
+{
+ 	uint32_t            err_code;
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_md_t cccd_md;
+    ble_gatts_attr_t    attr_char_value;
+    ble_uuid_t          ble_uuid;
+    ble_gatts_attr_md_t attr_md;
+
+    uint8_t             initial_button_level;
+    uint8_t             encoded_report_ref[BLE_SRV_ENCODED_REPORT_REF_LEN];
+    uint8_t             init_len;
+
+    // Add Battery Level characteristic
+    if (p_extra->is_notification_supported)
+    {
+        memset(&cccd_md, 0, sizeof(cccd_md));
+
+        // According to BAS_SPEC_V10, the read operation on cccd should be possible without
+        // authentication.
+        BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.read_perm);
+        cccd_md.write_perm 	= p_extra_init->button_char_attr_md.cccd_write_perm;
+        cccd_md.vloc 				= BLE_GATTS_VLOC_STACK;
+
+			}
+
+    memset(&char_md, 0, sizeof(char_md));
+
+    char_md.char_props.read   = 1;
+    char_md.char_props.notify = (p_extra->is_notification_supported) ? 1 : 0;
+    char_md.p_char_user_desc  = NULL;
+    char_md.p_char_pf         = NULL;
+    char_md.p_user_desc_md    = NULL;
+//char_md.p_cccd_md         = (p_bas->is_notification_supported) ? &cccd_md : NULL;
+    char_md.p_sccd_md         = NULL;
+
+		ble_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    ble_uuid.uuid = UUID_CHAR_EXTRA_BUTTON_TEST;
+    sd_ble_uuid_vs_add(&m_base_uuid128, &ble_uuid.type);
+
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    attr_md.read_perm  = p_extra_init->button_char_attr_md.read_perm;
+    attr_md.write_perm = p_extra_init->button_char_attr_md.write_perm;
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = 0;
+    attr_md.wr_auth    = 0;
+    attr_md.vlen       = 0;
+    initial_button_level = p_extra_init->initial_button_test;
+
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+
+    attr_char_value.p_uuid       = &ble_uuid;
+    attr_char_value.p_attr_md    = &attr_md;
+    attr_char_value.init_len     = sizeof(uint8_t);
+    attr_char_value.init_offs    = 0;
+    attr_char_value.max_len      = sizeof(uint8_t);
+    attr_char_value.p_value      = &initial_button_level;
+
+    err_code = sd_ble_gatts_characteristic_add(p_extra->service_handle, &char_md,&attr_char_value,&p_extra->ble_extra_button_test_handles);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+
+    if (p_extra_init->p_report_ref != NULL)
+    {
+        // Add Report Reference descriptor
+        BLE_UUID_BLE_ASSIGN(ble_uuid, BLE_UUID_REPORT_REF_DESCR);
+
+        memset(&attr_md, 0, sizeof(attr_md));
+
+        attr_md.read_perm = p_extra_init->button_report_read_perm;
+        BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.write_perm);
+
+        attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+        attr_md.rd_auth    = 0;
+        attr_md.wr_auth    = 0;
+        attr_md.vlen       = 0;
+
+        init_len = ble_srv_report_ref_encode(encoded_report_ref, p_extra_init->p_report_ref);
+
+        memset(&attr_char_value, 0, sizeof(attr_char_value));
+
+        attr_char_value.p_uuid       = &ble_uuid;
+        attr_char_value.p_attr_md    = &attr_md;
+        attr_char_value.init_len     = init_len;
+        attr_char_value.init_offs    = 0;
+        attr_char_value.max_len      = attr_char_value.init_len;
+        attr_char_value.p_value      = encoded_report_ref;
+
+        err_code = sd_ble_gatts_descriptor_add(p_extra->ble_extra_button_test_handles.value_handle,
+                                               &attr_char_value,
+                                               &p_extra->report_ref_handle);
+        if (err_code != NRF_SUCCESS)
+        {
+            return err_code;
+        }
+    }
+    else
+    {
+    	p_extra->report_ref_handle = BLE_GATT_HANDLE_INVALID;
+    }
+
+    return NRF_SUCCESS;
+}
+
+
+
+uint32_t ble_extra_init(ble_extra_t * p_extra, const ble_extra_init_t * p_extra_init)
+{
+    uint32_t   err_code;
+    ble_uuid_t ble_uuid;
+
+    // Initialize service structure
+    p_extra->evt_handler               = p_extra_init->evt_handler;
+    p_extra->conn_handle               = BLE_CONN_HANDLE_INVALID;
+    p_extra->is_notification_supported = p_extra_init->support_notification;
+    p_extra->battery_level_last        = INVALID_BATTERY_LEVEL;
+    p_extra->button_last 				= 0;
+    // Add service
+    //BLE_UUID_BLE_ASSIGN(ble_uuid, BLE_UUID_HEART_RATE_SERVICE); //TO BE CHANGED!!!
+		ble_uuid.type = BLE_UUID_TYPE_VENDOR_BEGIN + LAPA_VENDOR_UUID_INDEX;  // Position of the Vender specific ID base in m_base_uuid128.
+    ble_uuid.uuid = UUID_SERV_EXTRA;
+    err_code = sd_ble_uuid_vs_add(&m_base_uuid128, &ble_uuid.type);
+		
+    err_code = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, &ble_uuid, &p_extra->service_handle);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+		
+		// Add Activate Bootloader characteristic
+    err_code = dfu_lapa_activate_bootloader_char_add(p_extra);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+    
+		// Add Advertising Interval characteristics
+    err_code = settings_advslow_interval_char_add(p_extra, p_extra_init);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+
+    err_code = settings_max_connection_interval_default_char_add(p_extra, p_extra_init);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+		
+		// Add TXPower characteristics
+    err_code = settings_txpower_char_add(p_extra, p_extra_init);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+		
+		// Add Connection Mode characteristic
+    err_code = settings_connection_mode_char_add(p_extra, p_extra_init);
+    if (err_code != NRF_SUCCESS)
+    {
+        return err_code;
+    }
+
+	// Add button level characteristic
+	err_code = ble_extra_button_test_char_add(p_extra, p_extra_init);
+		if (err_code != NRF_SUCCESS)
+	{
+		return err_code;
+	}
+	return NRF_SUCCESS;
+}
+
+uint32_t ble_extra_adv_interval_slow_set(ble_extra_t * p_extra, uint16_t adv_interval_slow)
+{
+	ble_gatts_value_t gatts_value;
+
+    // Initialize value struct.
+    memset(&gatts_value, 0, sizeof(gatts_value));
+
+    gatts_value.len     = sizeof(uint16_t);
+    gatts_value.offset  = 0;
+    gatts_value.p_value = (uint8_t*)&adv_interval_slow;	
+    // Update database
+    return sd_ble_gatts_value_set(p_extra->conn_handle,p_extra->ble_extra_txpower_handles.value_handle,&gatts_value);
+}
+
+uint32_t ble_extra_max_conn_interval_default_set(ble_extra_t * p_extra, uint16_t max_conn_interval)
+{
+   ble_gatts_value_t gatts_value;
+
+    // Initialize value struct.
+    memset(&gatts_value, 0, sizeof(gatts_value));
+
+    gatts_value.len     = sizeof(uint16_t);
+    gatts_value.offset  = 0;
+    gatts_value.p_value = (uint8_t*)&max_conn_interval;	
+    // Update database
+    return sd_ble_gatts_value_set(p_extra->conn_handle,
+                                  p_extra->ble_extra_txpower_handles.value_handle,
+                                  &gatts_value);
+}
+
+
+
+
+uint32_t ble_extra_tx_power_level_set(ble_extra_t * p_extra, uint8_t tx_power_level)
+{
+
+   ble_gatts_value_t gatts_value;
+
+    // Initialize value struct.
+    memset(&gatts_value, 0, sizeof(gatts_value));
+
+    gatts_value.len     = sizeof(uint8_t);
+    gatts_value.offset  = 0;
+    gatts_value.p_value = (uint8_t*)&tx_power_level;	
+    // Update database
+    return sd_ble_gatts_value_set(p_extra->conn_handle,
+                                  p_extra->ble_extra_txpower_handles.value_handle,
+                                  &gatts_value);
+
+}
+
+uint32_t ble_extra_connection_mode_set(ble_extra_t * p_extra, uint32_t connection_mode)
+{
+    ble_gatts_value_t gatts_value;
+
+    // Initialize value struct.
+    memset(&gatts_value, 0, sizeof(gatts_value));
+
+    gatts_value.len     = sizeof(uint32_t);
+    gatts_value.offset  = 0;
+    gatts_value.p_value = (uint8_t*)&connection_mode;	
+    // Update database
+    return sd_ble_gatts_value_set(p_extra->conn_handle,
+                                  p_extra->ble_extra_txpower_handles.value_handle,
+                                  &gatts_value);
+}
+
+
+
+
+
+uint32_t ble_extra_button_test_update(ble_extra_t * p_extra, uint8_t button_test)
+{
+    uint32_t err_code = NRF_SUCCESS;
+
+
+    if (button_test != p_extra->button_last)
+    {
+        uint16_t len = sizeof(int8_t);
+
+        // Save new rssi value
+        p_extra->button_last = button_test;
+
+        ble_gatts_value_t gatts_value;
+
+		// Initialize value struct.
+		memset(&gatts_value, 0, sizeof(gatts_value));
+
+		gatts_value.len     = sizeof(uint8_t);
+		gatts_value.offset  = 0;
+		gatts_value.p_value = (uint8_t*)&button_test;
+		// Update database
+		err_code= sd_ble_gatts_value_set(p_extra->conn_handle, p_extra->ble_extra_button_test_handles.value_handle,&gatts_value);
+       if (err_code != NRF_SUCCESS)
+        {
+            return err_code;
+        }
+
+        // Send value if connected and notifying
+        if ((p_extra->conn_handle != BLE_CONN_HANDLE_INVALID) && p_extra->is_notification_supported)
+        {
+            ble_gatts_hvx_params_t hvx_params;
+            memset(&hvx_params, 0, sizeof(hvx_params));
+            len = sizeof(int8_t);
+
+            hvx_params.handle   = p_extra->ble_extra_button_test_handles.value_handle;
+            hvx_params.type     = BLE_GATT_HVX_NOTIFICATION;
+            hvx_params.offset   = 0;
+            hvx_params.p_len    = &len;
+            hvx_params.p_data   = (uint8_t*)&button_test;
+
+            err_code = sd_ble_gatts_hvx(p_extra->conn_handle, &hvx_params);
+
+        }
+        else
+        {
+
+            err_code = NRF_ERROR_INVALID_STATE;
+        }
+    }
+
+    return err_code;
+}
+
+

@@ -1,0 +1,74 @@
+#ifndef LAPA_BOARD_H
+#define LAPA_BOARD_H
+#include <stdbool.h>
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+//FIRMWARE CONFIG																					//
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+#define DEBUG							(false)
+#define DC_DC_EN						(false)
+#define ADV2_EN							(true)
+#define DEVICE_MANAGER_EN				(true)
+#define FLASH_DATA_LAPA_EN				(true)
+#define SCAN_REQUEST_NOTIFICATION_EN	(true)
+#define ADV_WHITE_LIST_EN				(true)
+#define SERV_BEEP_EN					(true)
+#define SERV_EXTRA_EN					(true)
+
+#define DEV_KIT							(false)
+#if (DEV_KIT == true)
+#define UART_EN							(true)
+#else
+#define UART_EN							(false)
+#endif
+
+//#define _BLE_UART_ENABLE_
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+//COLOR CONFIGURATION																				//
+//'b'->Blue Color																					//
+//'w'->White Color																					//
+//'k'->Black Color																					//
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+#define LAPA_COLOR						'b'
+#if (LAPA_COLOR=='w')
+#elif (LAPA_COLOR=='k')
+#elif (LAPA_COLOR=='b')
+#else
+	#error "Lapa color not defined"
+#endif
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+//BOARD PIN SETUP																					//
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+#if (DEV_KIT == true)					//PCA10028
+	#define BUZZER_PIN					21							//PIN 	IO		PWM		OUTPUT
+	#define EN1_PIN						22							//PIN 	IO		EN1		OUTPUT
+	#define EN2_PIN						23							//PIN 	IO		EN2		OUTPUT
+	#define LED_PIN						24							//PIN 	IO		EN2		OUTPUT
+	#define BUTTON_1       				17							//PIN 	IO		BUTTON	INPUT
+
+	#define RX_PIN_NUMBER  				11							//PIN 	UART 	RX		INPUT
+	#define TX_PIN_NUMBER  				9							//PIN 	UART 	TX		OUTPUT
+	#define CTS_PIN_NUMBER 				10							//PIN 	UART 	CTS		INPUT
+	#define RTS_PIN_NUMBER 				8							//PIN 	UART 	CTS		OUTPUT
+
+#else									//BOARD LAPA
+	#define BUZZER_PIN					0							//PIN 	IO		PWM		OUTPUT
+	#define EN1_PIN						4							//PIN 	IO		EN1		OUTPUT
+	#define EN2_PIN						5							//PIN 	IO		EN2		OUTPUT
+	#define LED_PIN						30							//PIN 	IO		LED		OUTPUT
+	#define BUTTON_1       				6							//PIN 	IO		BUTTON	INPUT
+#endif
+
+
+/*
+ *  Minimalistic INIT file structure
+ *  See Nordic docs for INIT (*.dat) file format details.
+ */
+#define NRF_CLOCK_LFCLKSRC      {.source        = NRF_CLOCK_LF_SRC_RC,              \
+                                 .rc_ctiv       = 16,                               \
+                                 .rc_temp_ctiv  = 2,                                \
+                                 .xtal_accuracy = NRF_CLOCK_LF_XTAL_ACCURACY_20_PPM}
+
+
+#endif

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>postbox_sdk11</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.cdt.managedbuilder.core.genmakebuilder</name>
+			<triggers>clean,full,incremental,</triggers>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.cdt.managedbuilder.core.ScannerConfigBuilder</name>
+			<triggers>full,incremental,</triggers>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>org.eclipse.cdt.core.cnature</nature>
+		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
+		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
+	</natures>
+	<linkedResources>
+		<link>
+			<name>Board Support</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>Device</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>_build</name>
+			<type>2</type>
+			<location>/home/andre/workspace/postbox_sdk11/_build</location>
+		</link>
+		<link>
+			<name>Board Support/bsp.c</name>
+			<type>1</type>
+			<location>/home/andre/nRF5_SDK_11.0.0_89a8197/examples/bsp/bsp.c</location>
+		</link>
+		<link>
+			<name>Board Support/bsp_btn_ble.c</name>
+			<type>1</type>
+			<location>/home/andre/nRF5_SDK_11.0.0_89a8197/examples/bsp/bsp_btn_ble.c</location>
+		</link>
+		<link>
+			<name>Device/gcc_startup_nrf51.s</name>
+			<type>1</type>
+			<location>/home/andre/nRF5_SDK_11.0.0_89a8197/components/toolchain/gcc/gcc_startup_nrf51.s</location>
+		</link>
+		<link>
+			<name>Device/system_nrf51.c</name>
+			<type>1</type>
+			<location>/home/andre/nRF5_SDK_11.0.0_89a8197/components/toolchain/system_nrf51.c</location>
+		</link>
+	</linkedResources>
+</projectDescription>

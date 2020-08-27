@@ -1,0 +1,207 @@
+#include <stdbool.h>
+#include "mainfile.h"
+
+
+/**@brief Function for initializing low frequency clock.
+ */
+void clock_initialization(void)
+{
+    NRF_CLOCK->LFCLKSRC            = (CLOCK_LFCLKSRC_SRC_Xtal << CLOCK_LFCLKSRC_SRC_Pos);
+    NRF_CLOCK->EVENTS_LFCLKSTARTED = 0;
+    NRF_CLOCK->TASKS_LFCLKSTART    = 1;
+
+    while (NRF_CLOCK->EVENTS_LFCLKSTARTED == 0)
+    {
+        // Do nothing.
+    }
+}
+/**@brief Pin I/O Board Init
+ *
+ *
+ */
+void init_io(void)
+{
+	//////////////////////////////////////////////////////////////////////////////////////////////////
+	/*Inicializar (todos) os pinos como entradas com (pull-up ou pull-down) ou saídas (low/Hi level)*/
+	nrf_gpio_cfg_input(1, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(2, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(3, NRF_GPIO_PIN_PULLDOWN);
+
+	nrf_gpio_cfg_input(7, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(8, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(9, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(10, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(11, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(12, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(13, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(14, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(15, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(16, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(17, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(18, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(19, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(20, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(21, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(22, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(23, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(24, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(25, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(28, NRF_GPIO_PIN_PULLDOWN);
+	nrf_gpio_cfg_input(29, NRF_GPIO_PIN_PULLDOWN);
+	//////////////////////////////////////////////////////////////////////////////////////////////////
+
+	//////////////////////////////////////////////////////////////////////////////////////////////////
+	nrf_gpio_cfg_output(LED_PIN);					//OUTUPUT DIRECTION
+	nrf_gpio_pin_set(LED_PIN);						//SET OFF
+
+	nrf_gpio_cfg_output(EN1_PIN);					//OUTUPUT DIRECTION
+	nrf_gpio_pin_clear(EN1_PIN);					//SET OFF
+
+	nrf_gpio_cfg_output(EN2_PIN);					//OUTUPUT DIRECTION
+	nrf_gpio_pin_clear(EN2_PIN);					//SET OFF
+
+	nrf_gpio_cfg_output(BUZZER_PIN);				//OUTUPUT DIRECTION
+	nrf_gpio_pin_clear(BUZZER_PIN);					//SET OFF
+
+	nrf_gpio_cfg_input(BUTTON_1, NRF_GPIO_PIN_PULLUP); //INPUT DIRECTION
+	// Configure button with sense level low as wakeup source.
+	nrf_gpio_cfg_sense_input(BUTTON_1,NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+	//////////////////////////////////////////////////////////////////////////////////////////////////
+
+}
+
+/**@brief Init global do sistema
+ *
+ *
+ */
+
+void init(void)
+{
+	DEVICE lapa;
+	uint32_t err_code;
+	// Initialize.
+
+	//err_code = NRF_LOG_INIT();
+	//APP_ERROR_CHECK(err_code);
+
+	init_io();										//Init IO PINS
+
+	NRF_POWER->TASKS_LOWPWR = 1;
+	NRF_SPI0->ENABLE = 0;							//SPI Disabled
+	NRF_UART0->TASKS_STOPTX = 1;
+	NRF_UART0->TASKS_STOPRX = 1;
+	NRF_UART0->ENABLE = 0;							//UART Disabled
+
+	clock_initialization();	  						// Initialize Clock Sys.
+
+	#if (UART_EN==true)
+	uart_init();									//Inicia UART
+	#endif
+
+
+	timers_init();									//Inicia timers de baixa frequencia
+	bluetooth_init();								//Inicia stack
+/*!
+ * The SoftDevice and scheduler must be initialized first before initializing the Persistent Storage Module.
+ * Modules that use this storage module shall then be initialized after the storage module.
+ * Block size and offset in load, store and update shall be a multiple of word size (4 bytes).
+ * In case blocks span across multiple flash pages update and clear of blocks might not work as expected.
+ * The application is expected to ensure that when a System OFF is issued, flash access is not ongoing or queued with the module.
+ * Writing data to blocks that already have data stored is unreliable. The application must clear the blocks before writing fresh data to it.
+ * No intermediate copy of source data to be stored in flash is made. Application cannot free or reuse the memory that is the source of data until this operation is complete.
+ * Completion of this operation is notified through the event notification callback.
+ * */
+	#if (DEVICE_MANAGER_EN==true)
+	if(!nrf_gpio_pin_read(BUTTON_1))				//Se botão pressionado
+		device_manager_init(true);					//Init dev manager e limpa as bonds em memória
+	else
+		device_manager_init(false);					//Init dev manager e preserva as bonds em memória
+	#endif
+	gap_params_init();								//Generic Profile Init
+	get_encrypted_name_for_authentication();		//Initialização da chave de autenticação para app mobile
+
+	advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_LIMITED_DISC_MODE);	//Inicialização das flags de advertise
+	advertising_set_default_params();
+
+	services_init();								//Inicialização dos serviços Ble
+	conn_params_init();								//Inicialiazção dos parametros de ligação bluetooth
+
+	pwm_init();										//Inicialização do periférico bluetooth
+	adc_configure();								//Inicialização do periférico ADC/Battery Reader
+	nrf_pwm_set_enabled(false);
+	if(!flash_read_setup(&lapa))					//Se não existir nada em memória flash
+	{
+		flash_set_defaults();						//Programa flash com os valores por defeito
+		flash_read_setup(&lapa);
+		#if (UART_EN==true)
+		printf("SET DEFAULTS\n");
+		#endif
+		nrf_gpio_pin_clear(LED_PIN);				//SET ON  INIDICADOR PARA Linha de PRODUçAO POS Carregamento de Firmware
+		nrf_delay_ms(1500);							//Delay 1.5 Segundos
+	}
+	if(nrf_gpio_pin_read(BUTTON_1))					//Se botão não estiver pressionado
+	{
+
+		switch(lapa.state)
+		{
+			case STATE_LAPA_UNREGISTERED:
+				#if (UART_EN==true)
+				printf("LAPA UNREG\n");
+				#endif
+				break;
+
+			case STATE_LAPA_REGISTERED:
+				#if (UART_EN==true)
+				printf("LAPA REG\n");
+				#endif
+				break;
+			case STATE_LAPA_POFF:					//Se o estado lido da flash durante a inicialização é OFF
+
+				#if (UART_EN==true)
+				printf("LAPA OFF\n");
+				#endif
+				#if (DEV_KIT==true)
+				nrf_gpio_pin_set(LED_PIN);
+				nrf_gpio_pin_set(EN1_PIN);
+				nrf_gpio_pin_set(EN2_PIN);
+				nrf_gpio_pin_set(BUZZER_PIN);
+				#else
+				nrf_gpio_pin_set(LED_PIN);			//SET LED OFF
+				#endif
+				//Go to system-off mode (this function will not return; wakeup will cause a reset)
+				err_code = sd_power_system_off(); //Sleep Mode
+				APP_ERROR_CHECK(err_code);
+				break;
+
+			default:								//Se o estado não for nenhum dos estados anteriores
+				#if (UART_EN==true)
+				printf("LAPA BOOT STATE: 0x%X\n",lapa.state);	//Imprime o valor do estado
+				#endif
+				break;
+		}
+	}
+
+	sound_led_indication(SOUND_OFF_LED_OFF,BEEP_VOL_OFF, false,0);	//Som e Led desactivado
+
+	if(lapa.state==STATE_LAPA_POFF)									//Se o estado lido da flash durante a inicialização for OFF
+	{
+		sound_led_indication(SOUND_LED_INIT,BEEP_VOL_3, true, 1);	//Reproduz som e indicação luminosa de inicialização
+		timer_poff_start(POFF_DEFAULT_TIMOUT);						//Programa Temporizador para voltar a sleep caso não ocorra autenticação
+		#if (UART_EN==true)
+		printf("timer_poff_start\r\n");
+		#endif
+	}
+
+	while(sound_led_is_busy());										//Espera que o som acabe para não haver ruido na reprodução do som devido as interrupções bluetooth
+
+	if(lapa.state==STATE_LAPA_POFF)									//Se o estado lido durante a inicialização for OFF
+		advertising_start(BLE_BUTTON_ADV);							//Faz Fast Advertise
+	else
+		advertising_start(BLE_SLOW_ADV);							//Faz Slow Advertise
+
+
+	button_init();													//Inicializa frequencia de amostragem do estado do botão -> modo operacional
+	battery_start_read();											//Inicialização da Thread para leitura da voltagem na bateria
+
+}
+

@@ -1,0 +1,29 @@
+#ifndef MAINFILE_H__
+#define MAINFILE_H__
+#include <stdio.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+#include "nrf_delay.h"
+#include "app_error.h"
+#include "lapa_board.h"
+//#include "radio_test.h"
+#include "nordic_common.h"
+#include "nrf_gpio.h"
+#include "ble_conn_params.h"
+#include "nrf_pwm.h"
+#include "pwm.h"
+#include "timers.h"
+#include "bluetooth.h"
+#include "adc.h"
+#include "pm.h"
+#include "uart.h"
+#include "button.h"
+#include "flash.h"
+#include "sound.h"
+
+void init(void);
+
+#endif
+

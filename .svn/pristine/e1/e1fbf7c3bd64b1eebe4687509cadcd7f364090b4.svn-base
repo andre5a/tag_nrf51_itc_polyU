@@ -1,0 +1,2035 @@
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include "softdevice_handler.h"
+#include "nrf.h"
+#include "nrf_soc.h"
+#include "nordic_common.h"
+#include "ble_advertising.h"
+#include "ble_advdata.h"
+#include "nrf_drv_adc.h"
+#include "app_error.h"
+#include "nrf_gpio.h"
+#include "nrf51_bitfields.h"
+#include "ble_hci.h"
+#include "lapa_board.h"
+#include "adc.h"
+#include "timers.h"
+#include "flash.h"
+#if(SERV_BEEP_EN==true)
+#include "ble_beep.h"
+#endif
+#if(SERV_EXTRA_EN==true)
+#include "ble_extra.h"
+#endif
+#include "ble_dis.h"
+#include "sound.h"
+#include "uart.h"
+#include "ble_conn_params.h"
+#include "ble_dfu.h"
+#include "dfu_app_handler.h"
+#include "ble_flash.h"
+#include "app_util_platform.h"
+#include "ble_radio_notification.h"
+#include "button.h"
+#include "nrf_adc.h"
+#include "safety_mode.h"
+#if (DEVICE_MANAGER_EN==true)
+#include "pstorage.h"
+#include "device_manager.h"
+#endif
+#include "bluetooth.h"
+
+
+
+#define IS_SRVC_CHANGED_CHARACT_PRESENT  0                                          /**< Include or not the service_changed characteristic. if not enabled, the server's database cannot be changed for the lifetime of the device*/
+
+
+#define TIMER_RSSI_TIME_BASE			100									//ms
+
+static BUF_ELEM 						raw_rssi_buf;
+static MY_BLE_DEV 						my_ble;
+static uint16_t                         m_conn_handle = BLE_CONN_HANDLE_INVALID;     /**< Handle of the current connection. */
+
+#if (DEVICE_MANAGER_EN==true)
+static dm_application_instance_t        m_app_handle;                                /**< Application identifier allocated by device manager */
+#endif
+
+static bool                            	m_memory_access_in_progress = false;          /**< Flag to keep track of ongoing operations on persistent memory. */
+static bool 							flash_write_flag = false;
+
+static int8_t 							raw_rssi=0;
+static int16_t 							avg_rssi = 0;
+static int8_t 							max_rssi = 0;
+static int8_t 							last_max_rssi = 0;
+
+static int16_t 							delta_rssi = -1;
+
+static bool 							burst_unlocked=true;
+static uint8_t  						m_safety_state;
+
+static ble_advertising_mode_t 			adv_pendent_mode=BLE_SLOW_ADV;
+#if (DEV_KIT==true)
+volatile static uint32_t 				time_stamp=0;
+#endif
+
+
+
+static ble_gap_addr_t 					addr_connected;
+static ble_gap_addr_t 					addr_auth[MAX_ACT_SCAN_ADD];
+static uint8_t 							act_scan_add_index=0;
+
+#if (ADV_WHITE_LIST_EN==true)
+static dm_handle_t                      m_bonded_peer_handle;                       	/**< Device reference handle to the current connected peer. */
+#endif
+static uint8_t                          m_direct_adv_cnt;                              	/**< Counter of direct advertisements. */
+
+/**@brief Function for initializing the Radio Notification event.
+ */
+
+static void radio_notification_init(void)
+{
+    uint32_t err_code;
+
+    err_code = ble_radio_notification_init(APP_IRQ_PRIORITY_HIGHEST,
+                                           NRF_RADIO_NOTIFICATION_DISTANCE_4560US,
+                                           ble_flash_on_radio_active_evt);
+    APP_ERROR_CHECK(err_code);
+}
+
+
+void scan_request_enable(void)
+{
+	advertising_start(BLE_NO_ADV);
+    const ble_opt_t scan_req_opt=
+    	{
+    		.gap_opt =
+    		{
+				.scan_req_report =
+				{
+					.enable=1
+				}
+    		}
+    	};
+    sd_ble_opt_set(BLE_GAP_OPT_SCAN_REQ_REPORT, &scan_req_opt);
+	advertising_start(BLE_ACTIVE_SCAN_ADV);
+	#if (UART_EN==true)
+	printf("BLE_ACTIVE_SCAN->ENABLE**\n");
+	#endif
+}
+
+
+
+void scan_request_disable(void)
+{
+	advertising_start(BLE_NO_ADV);
+
+    const ble_opt_t scan_req_opt=
+    	{
+    		.gap_opt =
+    		{
+				.scan_req_report =
+				{
+					.enable=0
+				}
+    		}
+    	};
+    sd_ble_opt_set(BLE_GAP_OPT_SCAN_REQ_REPORT, &scan_req_opt);
+	advertising_start(BLE_ACTIVE_SCAN_ADV);
+	#if (UART_EN==true)
+	printf("BLE_ACTIVE_SCAN->DISABLE**\n");
+	#endif
+
+}
+
+
+void timer_active_scan_handler(void * p_context)
+{
+	scan_request_enable();
+}
+
+
+
+/**@brief Function for handling the Application's BLE Stack events.
+ *
+ * @param[in]   p_ble_evt   Bluetooth stack event.
+ */
+
+void on_ble_evt(ble_evt_t * p_ble_evt)
+{
+  uint32_t        err_code = NRF_SUCCESS;
+  DEVICE lapa;
+  int8_t tmp,i;
+
+  ble_gap_addr_t peer_address;
+
+  flash_read_setup(&lapa);
+  switch (p_ble_evt->header.evt_id)
+   {
+        case BLE_GAP_EVT_CONNECTED:
+           	m_conn_handle=p_ble_evt->evt.gap_evt.conn_handle;
+           	addr_connected = p_ble_evt->evt.gap_evt.params.connected.peer_addr;
+
+			#if (UART_EN==true)
+           	printf("CONNECTED MAC: ");
+			uint8_t i;
+			for(i=0;i<6;i++)
+				printf("%X ",addr_connected.addr[i]);
+			printf("\n");
+			#endif
+
+           	my_ble.connected=true;
+			my_ble.rssi.subscribed=false;
+
+        	safety_mode_alarm_tout_stop();
+			timer_safety_mode_tx_pwr_tout_stop();
+   			timer_poff_stop();
+			timer_adv2_stop();
+			////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+			#if  (DEBUG==false)
+			my_ble.authenticated_user=false;
+			#else
+			my_ble.authenticated_user=true;
+			#endif
+			if(my_ble.safety_mode.en)
+        		my_ble.authenticated_user=true;//Mudar aqui para true se em teste
+			else
+			{
+				timer_authentication_stop();
+				#if (DEBUG==false)
+	    		timer_authentication_start(USER_AUTHENTICATION_TOUT);	//Timeout 30Segundo
+				#endif
+			}
+        	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			#if (ADV2_EN==true)
+			if(lapa.adv2.enable>=ADVERTISE_ENABLE)
+				timer_adv2_start(15000);
+			#endif
+			#if (UART_EN==true)
+			printf((const char *)"BLE CONNECTED\r\n");
+			#endif
+/////////////////////////NAO MEXER AQUI////////////////////////////////////////
+			if(my_ble.rssi.en)
+			{
+				my_ble.rssi.en=false;
+			//  err_code = sd_ble_gap_rssi_stop(m_conn_handle);
+            //  APP_ERROR_CHECK(err_code);
+			}
+///////////////////////////////////////////////////////////////////////////////
+			break;
+		case BLE_GAP_EVT_DISCONNECTED:
+			my_ble.connected=false;
+			#if (UART_EN==true)
+			printf((const char *)"BLE DISCONNECTED\r\n");
+			#endif
+
+			if(lapa.state==STATE_LAPA_POFF)
+			{
+				timer_poff_start(POFF_DEFAULT_TIMOUT);
+				#if (UART_EN==true)
+				printf((const char *)"timer_poff_start\r\n");
+				#endif
+			}
+
+			// Since we are not in a connection and have not started advertising, store bonds
+			//reset tx power on disconnect if not in safety_mode
+			if(my_ble.adv.current_mode==BLE_CONNECTED_ADV)		//Se está com ADV2
+				advertising_start(BLE_NO_ADV);					//Desliga ADV2
+
+
+			/*
+			 **************************************************************
+			 *Colocar aqui a gravação na flash
+			 **************************************************************
+			 *flash_write_setup(lapa);
+			 *
+			 */
+			if(flash_is_data_unsafe())
+			{
+				flash_read_setup(&lapa);
+				flash_write_setup(lapa);
+			}
+
+
+			if(my_ble.safety_mode.en)
+			{
+				advertising_start(BLE_SAFETY_MODE_ADV);
+				if(my_ble.safety_mode.mode==SAFETY_MODE_DISC)
+					safety_mode_alarm_tout_start(SAFETY_MODE_TIME_ALARM_DISCONNECT);
+			}
+			else
+			{
+				tx_power_set(TX_POWER_LEVEL_DEFAULT);
+				advertising_start(BLE_FAST_ADV);
+			}
+			m_conn_handle=BLE_CONN_HANDLE_INVALID;
+
+			break;
+        case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
+//ALTERADO 02-07-15 by Andr�
+//			err_code = sd_ble_gap_sec_params_reply(m_conn_handle,BLE_GAP_SEC_STATUS_SUCCESS, &m_sec_params,NULL);
+//			APP_ERROR_CHECK(err_code);
+            break;
+        case BLE_GAP_EVT_TIMEOUT:
+            if (p_ble_evt->evt.gap_evt.params.timeout.src == BLE_GAP_TIMEOUT_SRC_ADVERTISING)
+               	advertising_start(my_ble.adv.next_mode);
+            break;
+        case BLE_GATTC_EVT_TIMEOUT:
+        	printf("BLE_GATTC_EVT_TIMEOUT\n");
+       	//No break
+        case BLE_GATTS_EVT_TIMEOUT:
+    		printf("BLE_GATTS_EVT_TIMEOUT\n");
+        	// Disconnect on GATT Server and Client timeout events.
+            err_code = sd_ble_gap_disconnect(m_conn_handle,BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+            APP_ERROR_CHECK(err_code);
+            break;
+		case BLE_GAP_EVT_RSSI_CHANGED:							// NAO existe no NORDIC PROXIMITY mas existe no LAPA R1
+			if(my_ble.connected)
+				if(my_ble.rssi.en)
+				{
+					raw_rssi =p_ble_evt->evt.gap_evt.params.rssi_changed.rssi;
+					#if (UART_EN==true)
+					 printf("EVT RSSI:%d ", raw_rssi);
+					#endif
+
+					if(my_ble.safety_mode.en)
+					{
+						if(raw_rssi >= 0)
+							raw_rssi = my_ble.safety_mode.alarm_thres-1;//RSSI_THRESHOLD_ALARM-1;
+						if(my_ble.safety_mode.mode==SAFETY_MODE_ZONE)
+							rssi_process(raw_rssi);
+					}
+					if(my_ble.rssi.subscribed)
+					{
+						rssi_measure(raw_rssi);
+						//ble_rssi_update(&m_beep, (int8_t)raw_rssi);
+					}
+				}
+			break;
+		case BLE_GAP_EVT_CONN_PARAM_UPDATE:
+			break;
+
+		case BLE_GAP_EVT_SCAN_REQ_REPORT:
+/*
+			peer_address = p_ble_evt->evt.gap_evt.params.scan_req_report.peer_addr;
+			my_ble.rssi.rssi = p_ble_evt->evt.gap_evt.params.scan_req_report.rssi;
+			#if (UART_EN==true)
+			 printf("BLE_GAP_EVT_SCAN_REQ_REPORT:\n");
+			 printf("MAC: ");
+			 for(i=0;i<6;i++)
+				 printf("%X ",peer_address.addr[i]);
+			 printf("\n");
+			 printf("RSSI: %d dBm\n",my_ble.rssi.rssi );
+
+			 #endif
+*/
+			#if (UART_EN==true)
+			printf("BLE_GAP_EVT_SCAN_REQ_REPORT:\n");
+			#endif
+			/*
+			if(my_ble.connected==false)
+				 if(my_ble.adv.current_mode==BLE_SLOW_ADV)
+					//	if(ble_act_scan_add_is_present(peer_address))	//Se o endereço que enviou broadcast estiver na lista acelera advertise
+						{
+							#if (UART_EN==true)
+							printf("BLE ADD MATCH %d: ",act_scan_add_index);
+							for(i=0;i<6;i++)
+								printf("%X ",peer_address.addr[i]);
+							printf("\n");
+							#endif
+							advertising_start(BLE_NO_ADV);
+							advertising_start(BLE_ACTIVE_SCAN_ADV);
+							//advertising_start(BLE_FAST_ADV_WHITELIST);
+						}
+*/
+			//ble_stack_init(0);
+			#if (ADV_WHITE_LIST_EN==true)
+            if(m_bonded_peer_handle.appl_id != DM_INVALID_ID)
+            {
+				err_code = dm_peer_addr_get(&m_bonded_peer_handle, &peer_address);
+				//APP_ERROR_CHECK(err_code);
+				#if (UART_EN==true)
+				printf("LIST: ");
+				for(i=0;i<6;i++)
+					printf("%X ",peer_address.addr[i]);
+				printf("\n");
+				#endif
+            }
+			#endif
+
+			scan_request_disable();
+			timer_active_scan_start(5000);
+			break;
+        default:
+            // No implementation needed.
+            break;
+    }
+}
+
+/**@brief Function for handling Beep events.
+ *
+ * @details This function will be called for all Immediate Alert events which are passed to the
+ *          application.
+ *
+ * @param[in]   p_beep  Beep structure.
+ * @param[in]   p_evt  Event received from the Beep service.
+ */
+#if(SERV_BEEP_EN==true)
+void on_beep_evt(ble_beep_t * p_beep, ble_beep_evt_t * p_evt)
+{
+	DEVICE lapa;
+	uint32_t err_code;
+	uint8_t i=0;
+
+	#if (UART_EN==true)
+			printf((const char *)"BEEP EVT: 0x%x\n",p_evt->evt_type);
+	#endif
+	flash_read_setup(&lapa);
+
+	switch(p_evt->evt_type)
+	{
+		case CHAR_AUTHENTICATION:
+
+			if(my_ble.connected)
+			{
+				#if (UART_EN==true)
+				printf((const char *)"VERIFYING AUTHENTICATION...\n");
+				#endif
+				if(my_ble.authenticated_user==false)
+				if(check_authentication_string((char *)p_evt->authentication_word, (char *)my_ble.authentication_word,SOC_ECB_CIPHERTEXT_LENGTH)==true)
+				{
+					my_ble.authenticated_user=true;
+					#if (UART_EN==true)
+					printf((const char *)"VERIFICOU ...\n");
+					#endif
+				}
+				if(my_ble.authenticated_user)
+				{
+					if(!ble_act_scan_add_is_present(addr_connected))						//Se não estiver na lista adiciona à lista
+					{
+						if(act_scan_add_index>=MAX_ACT_SCAN_ADD)
+							act_scan_add_index=0;
+						memcpy(addr_auth[act_scan_add_index++].addr,addr_connected.addr,6);
+
+					}
+					if(lapa.state==STATE_LAPA_POFF)
+					{
+						lapa.state=STATE_LAPA_REGISTERED;
+						flash_write_setup_mem(lapa);
+						#if (UART_EN==true)
+						flash_read_setup(&lapa);
+						switch(lapa.state)
+						{
+							case STATE_LAPA_REGISTERED:
+								printf((const char *)"STATE LAPA REGISTERED OK\n");
+								break;
+							case STATE_LAPA_UNREGISTERED:
+								printf((const char *)"STATE LAPA UNREGISTERED\n");
+								break;
+							case STATE_LAPA_POFF:
+								printf((const char *)"STATE LAPA OFF\n");
+								break;
+						}
+						#endif
+					}
+					#if (UART_EN==true)
+					printf((const char *)"AUTHENTICATED\r\n");
+					#endif
+				}
+			}
+
+			break;
+		case CHAR_SND_ON_LED_ON:
+			if(my_ble.authenticated_user==true)
+			{
+				if((sound_led_is_busy()==false))
+					sound_led_indication(SOUND_LED_FOUNDIT,BEEP_VOL_3, true,p_evt->input[2]);
+				#if (UART_EN==true)
+				printf((const char *)"BLE_BEEP_BUZZER_W_LED\r\n");
+				#endif
+			}
+			break;
+		case CHAR_SND_ON_LED_OFF:
+			if((my_ble.authenticated_user==true))
+			{
+				if((sound_led_is_busy()==false))
+					sound_led_indication(SOUND_LED_FOUNDIT,BEEP_VOL_3, false, p_evt->input[2]);
+				#if (UART_EN==true)
+				printf((const char *)"BUZZER_ONLY\r\n");
+				#endif
+			}
+			break;
+		case CHAR_SND_OFF_LED_ON:
+			if((my_ble.authenticated_user==true))
+			{
+				if((sound_led_is_busy()==false))
+				sound_led_indication(SOUND_LED_FOUNDIT,BEEP_VOL_OFF, true, p_evt->input[2]);
+
+				#if (UART_EN==true)
+				printf((const char *)"LED_ONLY\r\n");
+				#endif
+			}
+			break;
+		case CHAR_SND_OFF_LED_OFF:
+			if(my_ble.authenticated_user==true)
+			{
+				sound_led_indication(SOUND_OFF_LED_OFF,BEEP_VOL_OFF, false, p_evt->input[2]);
+				#if (UART_EN==true)
+				printf((const char *)"BLE_BEEP_STOP\r\n");
+				#endif
+			}
+			break;
+
+		case CHAR_SAFETY_ON_SND_ON_FAR:
+			if(my_ble.authenticated_user==true)
+			{
+				timer_safety_mode_tx_pwr_tout_stop();
+				my_ble.safety_mode.en=true;
+				my_ble.safety_mode.snd_en=true;
+				my_ble.safety_mode.tx_pwr=p_evt->safety_mode_tx_power;
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE1;
+				my_ble.safety_mode.mode=SAFETY_MODE_DISC;
+				tx_power_set(p_evt->safety_mode_tx_power);
+				#if (UART_EN==true)
+				printf((const char *)"BLE_SAFETYMODE_FAR_W_BEEP_ON\n");
+				switch(my_ble.safety_mode.tx_pwr)
+				{
+					case 0:
+						printf((const char *)"TX PWR: +4dBm\n");
+						break;
+					case 1:
+						printf((const char *)"TX PWR: 0dBm\n");
+						break;
+					case 2:
+						printf((const char *)"TX PWR: -4dBm\n");
+						break;
+					case 3:
+						printf((const char *)"TX PWR: -8dBm\n");
+						break;
+					case 4:
+						printf((const char *)"TX PWR: -12dBm\n");
+						break;
+					case 5:
+						printf((const char *)"TX PWR: -16dBm\n");
+						break;
+					case 6:
+						printf((const char *)"TX PWR: -20dBm\n");
+						break;
+					case 7:
+						printf((const char *)"TX PWR: -30dBm\n");
+						break;
+					default:
+						printf((const char *)"TX PWR: ERROR VALUE\n");
+						break;
+					}
+
+				#endif
+				my_ble.safety_mode.arm=true;
+				timer_sfty_far_signaling_start(2000);
+			}
+			 break;
+		case CHAR_SAFETY_ON_SND_OFF_FAR:
+			if(my_ble.authenticated_user==true)
+			{
+				timer_safety_mode_tx_pwr_tout_stop();
+				my_ble.safety_mode.en=true;
+				my_ble.safety_mode.snd_en=false;
+				my_ble.safety_mode.tx_pwr=p_evt->safety_mode_tx_power;
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE1;
+				my_ble.safety_mode.mode=SAFETY_MODE_DISC;
+				tx_power_set(p_evt->safety_mode_tx_power);
+				#if (UART_EN==true)
+				printf((const char *)"BLE_SAFETYMODE_FAR_WO_BEEP_ON\n");
+				switch(my_ble.safety_mode.tx_pwr)
+				{
+					case 0:
+						printf((const char *)"TX PWR: +4dBm\n");
+						break;
+					case 1:
+						printf((const char *)"TX PWR: 0dBm\n");
+						break;
+					case 2:
+						printf((const char *)"TX PWR: -4dBm\n");
+						break;
+					case 3:
+						printf((const char *)"TX PWR: -8dBm\n");
+						break;
+					case 4:
+						printf((const char *)"TX PWR: -12dBm\n");
+						break;
+					case 5:
+						printf((const char *)"TX PWR: -16dBm\n");
+						break;
+					case 6:
+						printf((const char *)"TX PWR: -20dBm\n");
+						break;
+					case 7:
+						printf((const char *)"TX PWR: -30dBm\n");
+						break;
+					default:
+						printf((const char *)"TX PWR: ERROR VALUE\n");
+						break;
+					}
+					#endif
+					my_ble.safety_mode.arm=true;
+					timer_sfty_far_signaling_start(2000);
+			}
+			 break;
+		case CHAR_SAFETY_ON_SND_ON_NEAR:
+			if(my_ble.authenticated_user==true)
+			{
+				timer_safety_mode_tx_pwr_tout_stop();
+				my_ble.safety_mode.en=true;
+				my_ble.safety_mode.snd_en=true;
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE0;
+				my_ble.safety_mode.mode=SAFETY_MODE_ZONE;
+				my_ble.safety_mode.alarm_thres=p_evt->safety_threshold_alarm;
+				#if (UART_EN==true)
+				printf((const char *)"BLE_SAFETYMODE_NEAR_W_BEEP_ON\n");
+				printf((const char *)"THRESHOLD ALARM: %d dBm\n",my_ble.safety_mode.alarm_thres);
+				#endif
+				my_ble.safety_mode.arm=true;
+				max_rssi=0;
+				raw_rssi=0;
+				avg_rssi=0;
+				safety_mode_clr_buff(&raw_rssi_buf,NUM_RSSI_ELEM);
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE0;
+				if(my_ble.adv.current_mode==BLE_CONNECTED_ADV)
+					advertising_start(BLE_NO_ADV);
+				safety_state(SFT_ST_NEAR);
+				#if (DEV_KIT==true)
+				timer_tstamp_stop();
+				timer_tstamp_start(1);
+				time_stamp=0;
+				#endif
+
+				if(!my_ble.rssi.en)
+				{
+					 my_ble.rssi.en=true;
+					 err_code = sd_ble_gap_rssi_start(m_conn_handle,1, 0);
+					 APP_ERROR_CHECK(err_code);
+				}
+
+
+			}
+			 break;
+		case CHAR_SAFETY_ON_SND_OFF_NEAR:
+			if(my_ble.authenticated_user==true)
+			{
+				timer_safety_mode_tx_pwr_tout_stop();
+				my_ble.safety_mode.en=true;
+				my_ble.safety_mode.snd_en=false;
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE0;
+				my_ble.safety_mode.mode=SAFETY_MODE_ZONE;
+				my_ble.safety_mode.alarm_thres=p_evt->safety_threshold_alarm;
+				if(my_ble.safety_mode.alarm_thres>= RSSI_THRESHOLD_SAFETY)
+					my_ble.safety_mode.alarm_thres=RSSI_THRESHOLD_ALARM;
+				if(my_ble.safety_mode.alarm_thres< -100)
+					my_ble.safety_mode.alarm_thres=RSSI_THRESHOLD_ALARM;
+
+				#if (UART_EN==true)
+				printf((const char *)"BLE_SAFETYMODE_NEAR_WO_BEEP_ON\n");
+				printf((const char *)"THRESHOLD ALARM: %d dBm\n",my_ble.safety_mode.alarm_thres);
+				#endif
+				my_ble.safety_mode.arm=true;
+				//burst_unlocked=true;
+				max_rssi=0;
+				raw_rssi=0;
+				avg_rssi=0;
+				safety_mode_clr_buff(&raw_rssi_buf,NUM_RSSI_ELEM);
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE0;
+				if(my_ble.adv.current_mode==BLE_CONNECTED_ADV)
+					advertising_start(BLE_NO_ADV);
+				safety_state(SFT_ST_NEAR);
+				#if (DEV_KIT==true)
+				timer_tstamp_stop();
+				timer_tstamp_start(1);
+				time_stamp=0;
+				#endif
+				if(!my_ble.rssi.en)
+				{
+					 my_ble.rssi.en=true;
+					 err_code = sd_ble_gap_rssi_start(m_conn_handle,1, 0);
+					 APP_ERROR_CHECK(err_code);
+				}
+			}
+			 break;
+
+		case CHAR_SAFETY_OFF:
+			if(my_ble.authenticated_user==true)
+			{
+				my_ble.safety_mode.en=false;
+				my_ble.safety_mode.snd_en=false;
+				my_ble.safety_mode.tx_pwr=TX_POWER_LEVEL_DEFAULT;
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE1;
+				my_ble.safety_mode.mode=SAFETY_MODE_DISC;
+				tx_power_set(TX_POWER_LEVEL_DEFAULT);
+				#if (UART_EN==true)
+				printf((const char *)"BLE_SAFETYMODE_OFF\n");
+				#endif
+				my_ble.safety_mode.arm=false;
+
+				if(lapa.adv2.enable)
+					if(my_ble.adv.current_mode==BLE_NO_ADV)
+						advertising_start(BLE_CONNECTED_ADV);
+
+				if(my_ble.rssi.en)
+				{
+					my_ble.rssi.en=false;
+					err_code = sd_ble_gap_rssi_stop(m_conn_handle);
+					APP_ERROR_CHECK(err_code);
+				}
+
+			}
+			 break;
+
+        case CHAR_RSSI_NOTIF_ON:
+			#if (UART_EN==true)
+			printf((const char *)"RSSI Subscribe ENABLED\n");
+			#endif
+			if(my_ble.authenticated_user==true)
+			{
+				timer_rssi_thread_start(8*MAX_CONN_INTERVAL_DEFAULT_MS);
+				my_ble.rssi.subscribed=true;
+				if(!my_ble.rssi.en)
+				{
+					 my_ble.rssi.en=true;
+					 err_code = sd_ble_gap_rssi_start(m_conn_handle,1, 0);
+					 APP_ERROR_CHECK(err_code);
+				}
+			}
+            break;
+
+        case CHAR_RSSI_NOTIF_OFF:
+			#if (UART_EN==true)
+			printf((const char *)"RSSI Subscribe DISABLED\n");
+			#endif
+			if(my_ble.authenticated_user==true)
+			{
+				my_ble.rssi.subscribed=false;
+				if(my_ble.rssi.en)
+				{
+					 my_ble.rssi.en=false;
+					// Stop RSSI acquisition
+					 err_code = sd_ble_gap_rssi_stop(m_conn_handle);
+		             APP_ERROR_CHECK(err_code);
+				}
+			}
+            break;
+        case CHAR_BUTTON_NOTIF_ON:
+			#if (UART_EN==true)
+			printf((const char *)"BUTTON Subscribe ENABLED\n");
+			#endif
+
+            break;
+        case CHAR_BUTTON_NOTIF_OFF:
+			#if (UART_EN==true)
+			printf((const char *)"BUTTON Subscribe DISABLED\n");
+			#endif
+
+            break;
+
+
+        case CHAR_BATTERY_LEVEL:
+			if(my_ble.authenticated_user==true)
+			{
+				// Retrieve battery level and update characteristic
+			    if (nrf_adc_conversion_finished())
+					nrf_drv_adc_sample();
+			}
+            break;
+
+		case CHAR_STATE:
+			#if (UART_EN==true)
+			printf((const char *)"LAPA STATE: 0x%x\n",p_evt->input[2]);
+			#endif
+
+			if(my_ble.authenticated_user==true)
+			{
+				//set new Lapa state
+				lapa.state=p_evt->input[2];
+				flash_write_setup_mem(lapa);
+				flash_read_setup(&lapa);
+				if(lapa.state==STATE_LAPA_POFF)
+				{
+					flash_write_setup(lapa);
+	    			NVIC_SystemReset();
+				}
+			}
+			break;
+		case CHAR_PWR_OFF:
+			if(my_ble.authenticated_user==true)
+			{
+				lapa.state=STATE_LAPA_POFF;
+				flash_write_setup(lapa);
+    			NVIC_SystemReset();
+			}
+			break;
+
+		case CHAR_DISCONNECT:
+			#if (UART_EN==true)
+			printf((const char *)"DISCONNECT\r\n");
+			#endif
+
+			if(my_ble.authenticated_user==true)
+			{
+				//force disconnect
+				if(my_ble.connected==true)
+				{
+					err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+					APP_ERROR_CHECK(err_code);
+				}
+			}
+			break;
+
+		case CHAR_ADV2_CONFIG:
+			#if (UART_EN==true)
+			printf((const char *)"ADV2 Status: %u, time:%u\n",p_evt->input[1], p_evt->input[2]);
+			#endif
+
+			if(my_ble.authenticated_user==true)
+			{
+				lapa.adv2.enable=ADVERTISE_DISABLE;
+				lapa.adv2.time_adv=p_evt->input[2];
+				if((p_evt->input[1])!=ADVERTISE_DISABLE)
+				{
+					lapa.adv2.enable=ADVERTISE_ENABLE;
+					lapa.adv2.time_adv=p_evt->input[2];
+				}
+				flash_write_setup_mem(lapa);											//Necessário para ler os valores da flash após escrita em flash
+				timer_adv2_stop();
+				timer_adv2_start(1000);													//1 Segundo depois é actualizado o advertise 2 com os novos parametros
+			}
+
+			break;
+
+		default:
+			break;
+	}
+
+}
+#endif
+
+/**@brief Function for handling the Battery Service events.
+ *
+ * @details This function will be called for all Battery Service events which are passed to the
+ |          application.
+ *
+ * @param[in]   p_bas  Battery Service structure.
+ * @param[in]   p_evt  Event received from the Battery Service.
+ */
+
+/**@brief Function for handling the Battery Service events.
+ *
+ * @details This function will be called for all Battery Service events which are passed to the
+ |          application.
+ *
+ * @param[in]   p_bas  Battery Service structure.
+ * @param[in]   p_evt  Event received from the Battery Service.
+ */
+
+#if(SERV_EXTRA_EN==true)
+void on_extra_evt(ble_extra_t * p_extra, ble_extra_evt_t *p_evt)
+{
+		#if (UART_EN==true)
+		printf((const char *)"BAS EVT:0x%x\n",p_evt->evt_type);
+		#endif
+		switch (p_evt->evt_type)
+		{
+			case CHAR_CONNECTION_MODE:
+				if(my_ble.authenticated_user==true)
+					gap_conn_params_and_tx_power_change(p_evt->max_connection_interval, p_evt->tx_power_level);
+			break;
+
+			case CHAR_BOOTLOADER:
+//				if(my_ble.authenticated_user==true)	//Não tem autenticação!!!
+				{
+					//activate GPREGRET register for activating bootloader after system reset
+					sd_power_gpregret_set(1);
+					//system reset
+					sd_nvic_SystemReset();
+				}
+			break;
+			case CHAR_ADV_SLOW_INTERVAL:
+				if(my_ble.authenticated_user==true)
+				{
+					//action on Advertising Interval Slow update
+					my_ble.adv.interval = p_evt->adv_interval_slow;
+				}
+			break;
+			case CHAR_MAX_CONN_INTERVAL:
+				if(my_ble.authenticated_user==true)
+				{
+					//action on default max connection interval update
+					gap_conn_params_change(p_evt->max_conn_interval_default);
+				}
+			break;
+			case CHAR_TX_POWER:
+				if(my_ble.authenticated_user==true)
+				{
+					//action on TX Power update
+					tx_power_set(p_evt->tx_power_level);
+				}
+			break;
+			case CHAR_BUTTON_TEST_ENABLED:
+				#if (UART_EN==true)
+				printf((const char *)"CHAR_BUTTON_TEST Subscribe ENABLED\n");
+				#endif
+				button_test_subscribe_set(true);
+
+			break;
+			case CHAR_BUTTON_TEST_DISABLED:
+				#if (UART_EN==true)
+				printf((const char *)"CHAR_BUTTON_TEST Subscribe DISABLED\n");
+				#endif
+				button_test_subscribe_set(false);
+			break;
+			default:
+				// No implementation needed.
+			break;
+		}
+}
+
+#endif
+
+
+
+
+#if(SERV_BEEP_EN==true)
+void beep_service_init(void)
+{
+	uint32_t       						err_code;
+    ble_beep_init_t 					beep_init_obj;
+    memset(&beep_init_obj, 0, sizeof(beep_init_obj));
+    beep_init_obj.evt_handler 			= on_beep_evt;
+
+    beep_init_obj.support_notification 	= true;
+    beep_init_obj.p_report_ref       	= NULL;
+    beep_init_obj.initial_rssi  		= 0;
+	beep_init_obj.initial_lapa_state 	= 0;//lapa.state;
+
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&beep_init_obj.rssi_char_attr_md.cccd_write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&beep_init_obj.rssi_char_attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&beep_init_obj.rssi_report_read_perm);
+
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&beep_init_obj.rssi_char_attr_md.write_perm);
+
+
+    err_code = ble_beep_init(&m_beep, &beep_init_obj);
+    APP_ERROR_CHECK(err_code);
+}
+#endif
+
+#if(SERV_EXTRA_EN==true)
+void extra_service_init(void)
+{
+    uint32_t       err_code;
+    ble_extra_init_t extra_init_obj;
+
+    memset(&extra_init_obj, 0, sizeof(extra_init_obj));
+    extra_init_obj.evt_handler          = on_extra_evt;
+	extra_init_obj.initial_connection_mode = (MAX_CONN_INTERVAL_DEFAULT_MS<< 16 | TX_POWER_LEVEL_DEFAULT << 0);
+	extra_init_obj.support_notification=true;
+	err_code = ble_extra_init(&m_extra, &extra_init_obj);
+    APP_ERROR_CHECK(err_code);
+
+}
+#endif
+
+void dis_service_init(void)
+{
+	uint32_t       err_code;
+	ble_dis_init_t   dis_init;
+
+    // Initialize Device Information Service.
+    memset(&dis_init, 0, sizeof(dis_init));
+    ble_srv_ascii_to_utf8(&dis_init.manufact_name_str, MANUFACTURER_NAME);
+    ble_srv_ascii_to_utf8(&dis_init.model_num_str,     MODEL_NUM);
+    ble_srv_ascii_to_utf8(&dis_init.fw_rev_str,     	 FIRMWARE_REV);
+    ble_srv_ascii_to_utf8(&dis_init.hw_rev_str,     	 HARDWARE_REV);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&dis_init.dis_attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&dis_init.dis_attr_md.write_perm);
+    err_code = ble_dis_init(&dis_init);
+    APP_ERROR_CHECK(err_code);
+}
+
+
+/**@brief Function for the GAP initialization.
+ *
+ * @details This function sets up all the necessary GAP (Generic Access Profile) parameters of the
+ *          device including the device name, appearance, and the preferred connection parameters.
+ */
+void gap_params_init(void)
+{
+    uint32_t                err_code;
+    ble_gap_conn_params_t   gap_conn_params;
+    ble_gap_conn_sec_mode_t sec_mode;
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
+    memset(my_ble.dev_name,'\0',sizeof(my_ble.dev_name));
+//////////////////////////////////////////////////////////////////////////////////////
+	my_ble.mac_address[5]=NRF_FICR->DEVICEADDR[1]>>8;
+	my_ble.mac_address[4]=NRF_FICR->DEVICEADDR[1]>>0;
+	my_ble.mac_address[3]=NRF_FICR->DEVICEADDR[0]>>24;
+	my_ble.mac_address[2]=NRF_FICR->DEVICEADDR[0]>>16;
+	my_ble.mac_address[1]=NRF_FICR->DEVICEADDR[0]>>8;
+	my_ble.mac_address[0]=NRF_FICR->DEVICEADDR[0];
+	sprintf((char *)my_ble.dev_name,"%c%02X%02X%02X%02X%02X%02X",LAPA_COLOR,my_ble.mac_address[5],my_ble.mac_address[4],my_ble.mac_address[3],my_ble.mac_address[2],my_ble.mac_address[1],my_ble.mac_address[0]);
+    err_code = sd_ble_gap_device_name_set(&sec_mode,(const uint8_t *)my_ble.dev_name,strlen((const char *)my_ble.dev_name));
+    APP_ERROR_CHECK(err_code);
+//////////////////////////////////////////////////////////////////////////////////////
+    err_code = sd_ble_gap_appearance_set(BLE_APPEARANCE_GENERIC_TAG);
+    APP_ERROR_CHECK(err_code);
+    memset(&gap_conn_params, 0, sizeof(gap_conn_params));
+
+    gap_conn_params.min_conn_interval = MSEC_TO_UNITS((uint16_t) MIN_CONN_INTERVAL_DEFAULT_MS, UNIT_1_25_MS);
+    gap_conn_params.max_conn_interval = MSEC_TO_UNITS((uint16_t) MAX_CONN_INTERVAL_DEFAULT_MS, UNIT_1_25_MS);
+    gap_conn_params.slave_latency     = SLAVE_LATENCY_DEFAULT;
+    gap_conn_params.conn_sup_timeout  = CONN_SUP_TIMEOUT_DEFAULT;
+
+    err_code = sd_ble_gap_ppcp_set(&gap_conn_params);
+    APP_ERROR_CHECK(err_code);
+	if(err_code == NRF_SUCCESS)
+		ble_extra_max_conn_interval_default_set(&m_extra, MAX_CONN_INTERVAL_DEFAULT_MS);
+    tx_power_set(TX_POWER_LEVEL_DEFAULT);
+}
+
+/**@brief Function for handling a Connection Parameters error.
+ *
+ * @param[in]   nrf_error   Error code containing information about what went wrong.
+ */
+void conn_params_error_handler(uint32_t nrf_error)
+{
+    APP_ERROR_HANDLER(nrf_error);
+}
+/**@brief Function for initializing the Connection Parameters module.
+ */
+void conn_params_init(void)
+{
+    uint32_t               err_code;
+    ble_conn_params_init_t cp_init;
+
+    memset(&cp_init, 0, sizeof(cp_init));
+    cp_init.p_conn_params                  = NULL;
+    cp_init.first_conn_params_update_delay = FIRST_CONN_PARAMS_UPDATE_DELAY;
+    cp_init.next_conn_params_update_delay  = NEXT_CONN_PARAMS_UPDATE_DELAY;
+    cp_init.max_conn_params_update_count   = MAX_CONN_PARAMS_UPDATE_COUNT;
+    cp_init.start_on_notify_cccd_handle    = BLE_GATT_HANDLE_INVALID;
+    cp_init.disconnect_on_fail             = true;
+
+	cp_init.evt_handler                    = NULL;
+	cp_init.error_handler                  = conn_params_error_handler;
+
+    err_code = ble_conn_params_init(&cp_init);
+    APP_ERROR_CHECK(err_code);
+}
+
+void ble_evt_dispatch(ble_evt_t * p_ble_evt)
+{
+	#if (DEVICE_MANAGER_EN==true)
+	dm_ble_evt_handler(p_ble_evt);
+	#endif
+    ble_conn_params_on_ble_evt(p_ble_evt);
+    ble_extra_on_ble_evt(&m_extra, p_ble_evt);
+	ble_beep_on_ble_evt(&m_beep, p_ble_evt);
+	on_ble_evt(p_ble_evt);
+	ble_advertising_on_ble_evt(p_ble_evt);
+}
+
+/**@brief Function for dispatching a system event to interested modules.
+ *
+ * @details This function is called from the System event interrupt handler after a system
+ *          event has been received.
+ *
+ * @param[in]   sys_evt   System stack event.
+ */
+
+void sys_evt_dispatch(uint32_t sys_evt)
+{
+	#if (DEVICE_MANAGER_EN==true)
+	pstorage_sys_event_handler(sys_evt); //Add this line
+	on_sys_evt(sys_evt);
+	#endif
+    ble_advertising_on_sys_evt(sys_evt);
+}
+
+/**@brief Function for initializing the BLE stack.
+ *
+ * @details Initializes the SoftDevice and the BLE event interrupt.
+ */
+void ble_stack_init(void)
+{
+    uint32_t err_code;
+
+    nrf_clock_lf_cfg_t clock_lf_cfg = NRF_CLOCK_LFCLKSRC;
+
+    // Initialize the SoftDevice handler module.
+    SOFTDEVICE_HANDLER_INIT(&clock_lf_cfg, NULL);
+
+    ble_enable_params_t ble_enable_params;
+    err_code = softdevice_enable_get_default_config(CENTRAL_LINK_COUNT, PERIPHERAL_LINK_COUNT, &ble_enable_params);
+    APP_ERROR_CHECK(err_code);
+
+    // Check the ram settings against the used number of links
+    CHECK_RAM_START_ADDR(CENTRAL_LINK_COUNT, PERIPHERAL_LINK_COUNT);
+
+    // Enable BLE stack.
+    err_code = softdevice_enable(&ble_enable_params);
+    APP_ERROR_CHECK(err_code);
+
+    #if (SCAN_REQUEST_NOTIFICATION_EN==true)
+	const ble_opt_t scan_req_opt=
+		{
+			.gap_opt =
+			{
+				.scan_req_report =
+				{
+					.enable=1
+				}
+			}
+		};
+	sd_ble_opt_set(BLE_GAP_OPT_SCAN_REQ_REPORT, &scan_req_opt);
+	#endif
+    // Register with the SoftDevice handler module for BLE events.
+    err_code = softdevice_ble_evt_handler_set(ble_evt_dispatch);
+    APP_ERROR_CHECK(err_code);
+
+    // Register with the SoftDevice handler module for BLE events.
+    err_code = softdevice_sys_evt_handler_set(sys_evt_dispatch);
+    APP_ERROR_CHECK(err_code);
+}
+
+
+
+
+
+
+/**@brief Callback function for asserts in the SoftDevice.
+ *
+ * @details This function will be called in case of an assert in the SoftDevice.
+ *
+ * @warning This handler is an example only and does not fit a final product. You need to analyze 
+ *          how your product is supposed to react in case of Assert.
+ * @warning On assert from the SoftDevice, the system can only recover on reset.
+ *
+ * @param[in]   line_num   Line number of the failing ASSERT call.
+ * @param[in]   file_name  File name of the failing ASSERT call.
+ */
+void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
+{
+    app_error_handler(DEAD_BEEF, line_num, p_file_name);
+}
+
+
+/**@brief Function for handling Service errors.
+ *
+ * @details A pointer to this function will be passed to each service which may need to inform the
+ *          application about an error.
+ *
+ * @param[in]   nrf_error   Error code containing information about what went wrong.
+ */
+void service_error_handler(uint32_t nrf_error)
+{
+    APP_ERROR_HANDLER(nrf_error);
+}
+
+//disconnect user if not authenticated after AUTHENTICATION_TIMEOUT secs
+void authentication_timeout_handler(void * p_context)
+{
+	UNUSED_PARAMETER(p_context);
+	if((my_ble.authenticated_user==false) && (my_ble.safety_mode.en==false) && (my_ble.connected==true))
+	{
+		#if (UART_EN==true)
+		printf("PASSWORD TIMEOUT\r\n");
+		#endif
+		uint32_t err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+		APP_ERROR_CHECK(err_code);
+	}
+}
+
+void timer_poff_handler(void * p_context)
+{
+	UNUSED_PARAMETER(p_context);
+	DEVICE lapa;
+
+	flash_read_setup(&lapa);
+	if(lapa.state==STATE_LAPA_POFF)
+	{
+		if(my_ble.connected==false)
+		{
+			nrf_gpio_pin_set(LED_PIN);						//SET OFF
+			beep_set_volume(BEEP_VOL_OFF);
+			#if (UART_EN==true)
+			printf("timer_poff_timeout\r\n");
+			#endif
+			NVIC_SystemReset();
+		}
+	}
+
+
+}
+
+
+
+void tx_power_set(tx_power_t tx_power_level)
+{
+	const int8_t 				TX_POWER_LIST[8] 			= {4, 0, -4, -8, -12, -16, -20, -30};
+	int8_t tx_power;
+	switch(tx_power_level)
+	{
+	case TX_PLUS_4_dBm:
+		tx_power = TX_POWER_LIST[TX_PLUS_4_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: +4dBm\n");
+		#endif
+		break;
+	case TX_0_dBm:
+		tx_power = TX_POWER_LIST[TX_0_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: 0dBm\n");
+		#endif
+		break;
+	case TX_MINUS_4_dBm:
+		tx_power = TX_POWER_LIST[TX_MINUS_4_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: -4dBm\n");
+		#endif
+		break;
+	case  TX_MINUS_8_dBm:
+		tx_power = TX_POWER_LIST[TX_MINUS_8_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: -8dBm\n");
+		#endif
+		break;
+	case TX_MINUS_12_dBm:
+		tx_power = TX_POWER_LIST[TX_MINUS_12_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: -12dBm\n");
+		#endif
+		break;
+	case TX_MINUS_16_dBm:
+		tx_power = TX_POWER_LIST[TX_MINUS_16_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: -16dBm\n");
+		#endif
+		break;
+	case TX_MINUS_20_dBm:
+		tx_power = TX_POWER_LIST[TX_MINUS_20_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: -20dBm\n");
+		#endif
+		break;
+	case TX_MINUS_30_dBm:
+		tx_power = TX_POWER_LIST[TX_MINUS_30_dBm];
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: -30dBm\n");
+		#endif
+		break;
+	default:
+		#if (UART_EN==true)
+		printf((const char *)"TX PWR: ERRO Potencia nao existente\n");
+		#endif
+		tx_power = TX_POWER_LIST[TX_MINUS_30_dBm];
+			break;
+	}
+	uint32_t err_code = sd_ble_gap_tx_power_set(tx_power);
+	APP_ERROR_CHECK(err_code);
+	if(err_code == NRF_SUCCESS)
+	{
+		ble_extra_tx_power_level_set(&m_extra, tx_power_level);
+		ble_extra_connection_mode_set(&m_extra, (my_ble.conn_params.requested_max_conn_interval << 16 | tx_power_level << 0));
+	}
+}
+
+
+
+void get_encrypted_name_for_authentication(void)
+{
+	uint8_t i;
+	nrf_ecb_hal_data_t encryption_data;
+	uint8_t key[]=AUTHENTICATION_PASS;
+	memset(&encryption_data, 0, sizeof(encryption_data));
+	memcpy(&encryption_data.key, &key, SOC_ECB_CIPHERTEXT_LENGTH);
+	memcpy(&encryption_data.cleartext, &my_ble.dev_name, SOC_ECB_CIPHERTEXT_LENGTH);
+	sd_ecb_block_encrypt(&encryption_data);
+	//copy encrypted string to authentication_string
+	for(i=0;i<SOC_ECB_CIPHERTEXT_LENGTH;i++)
+		my_ble.authentication_word[i]=encryption_data.ciphertext[i];
+}
+
+
+
+
+void gap_conn_params_and_tx_power_change(int16_t max_connection_interval, uint8_t tx_power_level)
+{
+	gap_conn_params_change(max_connection_interval);
+	tx_power_set(tx_power_level);
+}
+
+
+
+/**@brief Function for the GAP Connection Parameters Change.
+ *
+ * @details This function is used to change the connection parameters
+ *
+ */
+void gap_conn_params_change(uint16_t max_connection_interval)
+{
+	ble_gap_conn_params_t  updated_cnxn_param;
+	uint32_t               err_code;
+	
+	updated_cnxn_param.min_conn_interval =  MSEC_TO_UNITS((uint16_t)(((uint16_t)max_connection_interval)-((uint16_t)25)), UNIT_1_25_MS);
+	updated_cnxn_param.max_conn_interval =  MSEC_TO_UNITS((uint16_t) max_connection_interval, UNIT_1_25_MS);
+	updated_cnxn_param.slave_latency     =  SLAVE_LATENCY_DEFAULT;
+	updated_cnxn_param.conn_sup_timeout  =  CONN_SUP_TIMEOUT_DEFAULT;
+		
+	// Initialize and set-up connection parameter negotiation module
+	// if this method is called upon connection it will immediately slow down
+	err_code = ble_conn_params_change_conn_params(&updated_cnxn_param);
+	if(err_code == NRF_SUCCESS)
+	{
+		// Procedure request succeeded. Connection parameters will be negotiated as requested.
+		// BLE_CONN_PARAMS_EVT_SUCCEEDED will be notified if parameter negotiation is successful.
+		//my_ble.conn_params.requested_conn_params_change = true;
+		my_ble.conn_params.requested_max_conn_interval = max_connection_interval;
+	}
+	else
+	{
+			// Procedure request failed.
+	}
+}
+
+/**@brief Function for initializing the Advertising functionality.
+ *
+ * @details Encodes the required advertising data and passes it to the stack.
+ *          Also builds a structure to be passed to the stack when starting advertising.
+ *
+ * @param[in]  adv_flags  Indicates which type of advertisement to use, see @ref BLE_GAP_DISC_MODES.
+ *
+ */
+
+void advertising_init(uint8_t adv_flags)
+{
+    uint32_t      					err_code;
+    ble_advdata_t 					advdata;
+    ble_advdata_service_data_t		service_data;
+	DEVICE 							lapa;
+	flash_read_setup(&lapa);
+    uint16_t sdata =  				((my_ble.connected << 8) | battery_level());
+    if(my_ble.adv.current_mode==BLE_BUTTON_ADV)
+    	sdata =  				((2 << 8) | battery_level());
+    service_data.service_uuid 		= UUID_SERV_BEEP;
+    service_data.data.size    		= 2;
+    service_data.data.p_data  		= (uint8_t*)&sdata;
+	ble_uuid_t adv_uuids[] 			=	{	\
+    										{UUID_SERV_BEEP, BLE_UUID_TYPE_BLE} \
+    									};
+    // Build and set advertising data
+    memset(&advdata, 0, sizeof(advdata));
+    advdata.name_type          		= BLE_ADVDATA_FULL_NAME;
+    advdata.include_appearance 		= false;
+	advdata.flags              		= adv_flags;
+ 	advdata.uuids_complete.uuid_cnt = sizeof(adv_uuids) / sizeof(adv_uuids[0]);
+    advdata.uuids_complete.p_uuids  = adv_uuids;
+	advdata.service_data_count   	= 1;
+    advdata.p_service_data_array 	= &service_data;
+    err_code = ble_advdata_set(&advdata, NULL);
+    APP_ERROR_CHECK(err_code);
+}
+
+
+
+void advertising_set_default_params(void)
+{
+	my_ble.adv.interval 				= APP_ADV_INTERVAL_SLOW;
+	ble_extra_adv_interval_slow_set(&m_extra, my_ble.adv.interval);
+}
+
+/**@brief Function for starting advertising.
+ */
+void advertising_start(ble_advertising_mode_t mode)
+{
+    DEVICE			lapa;
+    ble_gap_whitelist_t  whitelist;
+    uint32_t             err_code;
+    ble_gap_adv_params_t adv_params;
+    ble_gap_addr_t       peer_address;
+
+	#if (DEVICE_MANAGER_EN==true)|| (FLASH_DATA_LAPA_EN==true)
+    uint32_t             count;
+    // Verify if there is any flash access pending, if yes delay starting advertising until
+    // it's complete.
+    err_code = pstorage_access_status_get(&count);
+    APP_ERROR_CHECK(err_code);
+    if (count != 0)
+    {
+        m_memory_access_in_progress = true;
+        adv_pendent_mode=mode;
+        return;
+    }
+	#endif
+    flash_read_setup(&lapa);
+
+    // Initialize advertising parameters with defaults values
+    memset(&adv_params, 0, sizeof(adv_params));
+
+	#if (UART_EN==true)
+	printf((const char *)"advertising_start:0x%x\r\n",mode);
+	#endif
+    // Configure advertisement according to current advertising state
+	my_ble.adv.current_mode=mode;
+	#if (ADV_WHITE_LIST_EN==true)
+    // Configure advertisement according to current advertising state.
+	   if (my_ble.adv.current_mode == BLE_DIRECTED_ADV)
+	   {
+		   err_code = dm_peer_addr_get(&m_bonded_peer_handle, &peer_address);
+		   if (err_code != NRF_SUCCESS)
+		   {
+			   my_ble.adv.current_mode = BLE_FAST_ADV_WHITELIST;
+		   }
+	   }
+	#endif
+    switch (my_ble.adv.current_mode)
+    {
+        case BLE_NO_ADV:
+			my_ble.adv.next_mode=BLE_NO_ADV;
+			err_code=sd_ble_gap_adv_stop();
+			APP_ERROR_CHECK(err_code);
+			break;
+
+        case BLE_FAST_ADV_WHITELIST:
+        {
+            ble_gap_addr_t       * p_whitelist_addr[BLE_GAP_WHITELIST_ADDR_MAX_COUNT];
+            ble_gap_irk_t        * p_whitelist_irk[BLE_GAP_WHITELIST_IRK_MAX_COUNT];
+
+            whitelist.addr_count = BLE_GAP_WHITELIST_ADDR_MAX_COUNT;
+            whitelist.irk_count  = BLE_GAP_WHITELIST_IRK_MAX_COUNT;
+            whitelist.pp_addrs   = p_whitelist_addr;
+            whitelist.pp_irks    = p_whitelist_irk;
+
+			#if (UART_EN==true)
+			printf((const char *)"BLE_WHITE_LIST!!!\n");
+			#endif
+
+			#if (DEVICE_MANAGER_EN==true)
+
+            err_code = dm_whitelist_create(&m_app_handle, &whitelist);
+            APP_ERROR_CHECK(err_code);
+			#endif
+            if ((whitelist.addr_count != 0) || (whitelist.irk_count != 0))
+            {
+                adv_params.fp          = BLE_GAP_ADV_FP_FILTER_CONNREQ;
+                adv_params.p_whitelist = &whitelist;
+
+                advertising_init(BLE_GAP_ADV_FLAG_BR_EDR_NOT_SUPPORTED);
+    			adv_params.interval = APP_ADV_INTERVAL_FAST;
+    			adv_params.timeout  = APP_FAST_ADV_TIMEOUT_S;
+    		    err_code = sd_ble_gap_adv_start(&adv_params);
+    		    APP_ERROR_CHECK(err_code);
+
+    		    #if (UART_EN==true)
+				printf((const char *)"BLE_WHITE_LIST!!!FAST!!\n");
+				#endif
+
+            }
+            else
+            {
+    			adv_params.type        = BLE_GAP_ADV_TYPE_ADV_IND; 						//Connectable undirected -> any central can connect to device
+    			adv_params.p_peer_addr = NULL;
+    			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 							//Allow scan requests and connect requests from any device
+    			adv_params.p_whitelist = NULL;
+                advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+                adv_params.interval = my_ble.adv.interval;
+    			adv_params.interval = APP_ADV_INTERVAL_SLOW;
+    			adv_params.timeout  = APP_SLOW_ADV_TIMEOUT_S;
+    		    err_code = sd_ble_gap_adv_start(&adv_params);
+    		    APP_ERROR_CHECK(err_code);
+            }
+        	my_ble.adv.next_mode = BLE_SLOW_ADV;
+            break;
+        }
+
+        case BLE_DIRECTED_ADV:
+		   adv_params.p_peer_addr = &peer_address;
+		   adv_params.type        = BLE_GAP_ADV_TYPE_ADV_DIRECT_IND;
+		   adv_params.timeout     = 0;
+
+		   m_direct_adv_cnt--;
+		   if (m_direct_adv_cnt == 0)
+			   my_ble.adv.next_mode  = BLE_FAST_ADV_WHITELIST;
+           break;
+
+        case BLE_SLOW_ADV:
+			adv_params.type        = BLE_GAP_ADV_TYPE_ADV_IND; 							//Connectable undirected -> any central can connect to device
+			adv_params.p_peer_addr = NULL;
+			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 								//Allow scan requests and connect requests from any device
+			adv_params.p_whitelist = NULL;
+            advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+            adv_params.interval = my_ble.adv.interval;
+			#if (UART_EN==true)
+			printf((const char *)"BLE_SLOW_ADV Interval: %u Ticks\n",my_ble.adv.interval);
+			#endif
+            adv_params.timeout  = APP_SLOW_ADV_TIMEOUT_S;
+			my_ble.adv.next_mode=BLE_FAST_ADV;
+		    // Start advertising
+		    err_code = sd_ble_gap_adv_start(&adv_params);
+		    APP_ERROR_CHECK(err_code);
+			break;
+
+        case BLE_FAST_ADV:
+			#if (UART_EN==true)
+			printf((const char *)"BLE_FAST_ADV!!!\n");
+			#endif
+			adv_params.type        = BLE_GAP_ADV_TYPE_ADV_IND; 							//Connectable undirected -> any central can connect to device
+			adv_params.p_peer_addr = NULL;
+			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 								//Allow scan requests and connect requests from any device
+			adv_params.p_whitelist = NULL;
+            advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+			adv_params.interval = APP_ADV_INTERVAL_FAST;
+			adv_params.timeout  = APP_FAST_ADV_TIMEOUT_S;
+			my_ble.adv.next_mode= BLE_SLOW_ADV;
+		    // Start advertising
+		    err_code = sd_ble_gap_adv_start(&adv_params);
+		    APP_ERROR_CHECK(err_code);
+			break;
+
+        case BLE_BUTTON_ADV:
+			#if (UART_EN==true)
+			printf((const char *)"BLE_BUTTON_ADV\n");
+			#endif
+			adv_params.type        = BLE_GAP_ADV_TYPE_ADV_IND; 							//Connectable undirected -> any central can connect to device
+			adv_params.p_peer_addr = NULL;
+			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 								//Allow scan requests and connect requests from any device
+			adv_params.p_whitelist = NULL;
+            advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+			adv_params.interval = APP_ADV_INTERVAL_BUTTON;
+			adv_params.timeout  = APP_BUTTON_ADV_TIME_S;
+			my_ble.adv.next_mode= BLE_SLOW_ADV;
+		    // Start advertising
+		    err_code = sd_ble_gap_adv_start(&adv_params);
+		    APP_ERROR_CHECK(err_code);
+			break;
+
+        case BLE_SAFETY_MODE_ADV:
+			#if (UART_EN==true)
+			printf((const char *)"BLE_SAFETY_MODE_ADV\n");
+			#endif
+			adv_params.type        = BLE_GAP_ADV_TYPE_ADV_IND; 							//Connectable undirected -> any central can connect to device
+			adv_params.p_peer_addr = NULL;
+			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 								//Allow scan requests and connect requests from any device
+			adv_params.p_whitelist = NULL;
+            advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+			adv_params.interval = APP_ADV_INTERVAL_SAFETY_MODE;
+			adv_params.timeout  = APP_SAFETY_MODE_ADV_TIMEOUT_S;
+			my_ble.adv.next_mode= BLE_SLOW_ADV;
+		    // Start advertising
+		    err_code = sd_ble_gap_adv_start(&adv_params);
+		    APP_ERROR_CHECK(err_code);
+			break;
+
+        case BLE_CONNECTED_ADV:
+			#if (UART_EN==true)
+			printf((const char *)"BLE_ADV2\n");
+			#endif
+        	adv_params.type        = BLE_GAP_ADV_TYPE_ADV_NONCONN_IND; 					//Connectable undirected -> any central can connect to device
+			adv_params.p_peer_addr = NULL;
+			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 								//Allow scan requests and connect requests from any device
+			adv_params.p_whitelist = NULL;
+		    advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+            adv_params.interval = MSEC_TO_UNITS((uint16_t) ((lapa.adv2.time_adv/10)*1000+(lapa.adv2.time_adv%10)*100), UNIT_0_625_MS);//APP_ADV_2_INTERVAL;
+            adv_params.timeout  = APP_CONNECTED_ADV_TIMEOUT_S;
+			my_ble.adv.next_mode= BLE_SLOW_ADV;
+		    // Start advertising
+		    err_code = sd_ble_gap_adv_start(&adv_params);
+		    APP_ERROR_CHECK(err_code);
+			break;
+
+
+        case BLE_ACTIVE_SCAN_ADV:
+ 			#if (UART_EN==true)
+ 			printf((const char *)"BLE ACTIVE SCAN ADV %lu ms\n",time_stamp);
+ 			time_stamp=0;
+
+ 			#endif
+ 			adv_params.type        = BLE_GAP_ADV_TYPE_ADV_IND; 							//Connectable undirected -> any central can connect to device
+ 			adv_params.p_peer_addr = NULL;
+ 			adv_params.fp          = BLE_GAP_ADV_FP_ANY; 								//Allow scan requests and connect requests from any device
+ 			adv_params.p_whitelist = NULL;
+             advertising_init(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+ 			adv_params.interval = APP_ADV_INTERVAL_ACTIVE_SCAN;
+ 			adv_params.timeout  = APP_ACTIVE_SCAN_ADV_DURATION_S;
+ 			my_ble.adv.next_mode= BLE_SLOW_ADV;
+ 		    // Start advertising
+ 		    err_code = sd_ble_gap_adv_start(&adv_params);
+ 		    APP_ERROR_CHECK(err_code);
+ 			break;
+
+        default:
+            // No implementation needed.
+            break;
+    }
+}
+
+
+
+
+/**@brief Function for initializing the services that will be used by the application.
+ */
+
+void services_init(void)
+{
+	#if(SERV_EXTRA_EN==true)
+	extra_service_init();
+	#endif
+	#if(SERV_BEEP_EN==true)
+   	beep_service_init();
+	#endif
+   	dis_service_init();
+}
+
+void bluetooth_init(void)
+{
+	my_ble.authenticated_user=false;
+	my_ble.connected=false;
+	my_ble.safety_mode.en=false;
+	ble_stack_init();	//Bluetooth Stack Init
+ 	radio_notification_init();
+	my_ble.rssi.en=false;
+	my_ble.safety_mode.zone=0;
+}
+
+
+
+
+
+bool check_authentication_string(char *word1, char *word2, unsigned char size)
+{
+	uint8_t i;
+	for(i=0;i<size;i++)
+	{
+		if(word1[i]!=word2[i])
+			return false;
+	}
+	return true;
+}
+
+
+
+
+void bluetooth_read(MY_BLE_DEV *dev)
+{
+	memcpy(dev,&my_ble,sizeof(MY_BLE_DEV));
+}
+
+
+
+void on_sys_evt(uint32_t sys_evt)
+{
+
+    switch(sys_evt)
+    {
+        case NRF_EVT_FLASH_OPERATION_SUCCESS:
+        case NRF_EVT_FLASH_OPERATION_ERROR:
+			#if (DEVICE_MANAGER_EN==true)
+        	if (m_memory_access_in_progress)
+            {
+				#if (UART_EN==true)
+				printf("NRF_EVT_FLASH_OPERATION!\r\n");
+				#endif
+                m_memory_access_in_progress = false;
+                advertising_start(adv_pendent_mode);								//Recupera o advertise que não executou enquanto escrevia na flash
+            }
+			#endif
+        	break;
+        default:
+            // No implementation needed.
+            break;
+    }
+
+}
+
+void battery_adv_update(void)
+{
+	if(my_ble.connected==false)
+	{
+		advertising_start(BLE_NO_ADV);												//Advertise Stop
+		advertising_start(BLE_SLOW_ADV);											//Advertise re-start in SLOW ADV
+	}
+}
+
+void button_adv_set(void)
+{
+	if(my_ble.connected==false)
+	{
+		advertising_start(BLE_NO_ADV);
+		advertising_start(BLE_BUTTON_ADV);
+	}
+}
+
+void timer_safety_mode_tx_pwr_tout_handler(void * p_context)
+{
+	tx_power_set(TX_POWER_LEVEL_DEFAULT);
+	#if (UART_EN==true)
+	printf((const char *)"SAFETY MODE TX PWR TOUT\n");
+	#endif
+
+}
+
+#if (DEVICE_MANAGER_EN==true)
+
+#define SEC_PARAM_BOND                  1                                            /**< Perform bonding. */
+#define SEC_PARAM_MITM                  0                                            /**< Man In The Middle protection not required. */
+#define SEC_PARAM_IO_CAPABILITIES       BLE_GAP_IO_CAPS_NONE                         /**< No I/O capabilities. */
+#define SEC_PARAM_OOB                   0                                            /**< Out Of Band data not available. */
+#define SEC_PARAM_MIN_KEY_SIZE          7                                            /**< Minimum encryption key size. */
+#define SEC_PARAM_MAX_KEY_SIZE          16                                           /**< Maximum encryption key size. */
+
+
+/**@brief Function for handling the Device Manager events.
+ *
+ * @param[in] p_evt  Data associated to the device manager event.
+ */
+static uint32_t device_manager_evt_handler(dm_handle_t const * p_handle,
+                                           dm_event_t const  * p_event,
+                                           ret_code_t        event_result)
+{
+    APP_ERROR_CHECK(event_result);
+
+	#if (ADV_WHITE_LIST_EN==true)
+    switch (p_event->event_id)
+    {
+        case DM_EVT_DEVICE_CONTEXT_LOADED: // Fall through.
+        case DM_EVT_SECURITY_SETUP_COMPLETE:
+            m_bonded_peer_handle = (*p_handle);
+            break;
+    }
+	#endif
+    return NRF_SUCCESS;
+}
+
+
+/**@brief Function for the Device Manager initialization.
+ *
+ * @param[in] erase_bonds  Indicates whether bonding information should be cleared from
+ *                         persistent storage during initialization of the Device Manager.
+ */
+void device_manager_init(bool erase_bonds)
+{
+
+    uint32_t               err_code;
+    dm_init_param_t        init_param = {.clear_persistent_data = erase_bonds};
+    dm_application_param_t register_param;
+
+    // Initialize persistent storage module.
+    err_code = pstorage_init();
+    APP_ERROR_CHECK(err_code);
+
+    err_code = dm_init(&init_param);
+    APP_ERROR_CHECK(err_code);
+
+    memset(&register_param.sec_param, 0, sizeof(ble_gap_sec_params_t));
+    register_param.sec_param.bond         = SEC_PARAM_BOND;
+    register_param.sec_param.mitm         = SEC_PARAM_MITM;
+    register_param.sec_param.io_caps      = SEC_PARAM_IO_CAPABILITIES;
+    register_param.sec_param.oob          = SEC_PARAM_OOB;
+    register_param.sec_param.min_key_size = SEC_PARAM_MIN_KEY_SIZE;
+    register_param.sec_param.max_key_size = SEC_PARAM_MAX_KEY_SIZE;
+    register_param.evt_handler            = device_manager_evt_handler;
+    register_param.service_type           = DM_PROTOCOL_CNTXT_GATT_SRVR_ID;
+
+    err_code = dm_register(&m_app_handle, &register_param);
+    APP_ERROR_CHECK(err_code);
+
+}
+#endif
+
+
+
+void timer_adv2_handler(void * p_context)
+{
+	DEVICE lapa;
+	if(my_ble.connected)
+	{
+		flash_read_setup(&lapa);
+		if(my_ble.adv.current_mode==BLE_CONNECTED_ADV)										//Se houver uma actualização do tempo de ADV2
+			advertising_start(BLE_NO_ADV);													//Faz Stop do ADV2
+		if(lapa.adv2.enable==ADVERTISE_ENABLE)												//Se comando para activar advertise 2
+			if(my_ble.safety_mode.en==false)
+			{
+				advertising_start(BLE_CONNECTED_ADV);
+				#if (UART_EN==true)
+				printf((const char *)"START ADV2\n");
+				#endif
+			}
+	}
+}
+
+
+void safety_mode_alarm(void)
+{
+	#if (UART_EN==true)
+	printf((const char *)"SAFETY MODE ALARM\n");
+	#endif
+
+	if(my_ble.connected==false)
+	{
+		timer_safety_mode_tx_pwr_tout_stop();
+		timer_safety_mode_tx_pwr_tout_start(DEFAULT_TX_POWER_TOUT);
+	}
+	if(my_ble.safety_mode.en)
+		if(my_ble.safety_mode.arm)
+		{
+			my_ble.safety_mode.arm=false;
+			if(my_ble.connected==false)
+				my_ble.safety_mode.en=false;												//É reactivado pela aplicação
+			if(my_ble.safety_mode.snd_en)
+				sound_led_indication(SOUND_LED_SAFETY,BEEP_VOL_3, true, SND_SAFETY_REPETITIONS);
+		}
+}
+
+
+
+void timer_safety_alarm_tout_handler(void * p_context)
+{
+	safety_mode_alarm();
+}
+
+
+
+int rssi_measure(int8_t rssi)
+{
+	int8_t tmp;
+	uint8_t i;
+	////////////////////////////////////////////MEDIA RSSI////////////////////////////////////////////////////////////////////////////////////
+	avg_rssi=0;
+	insert_elem(&raw_rssi_buf, rssi, NUM_RSSI_ELEM);										//Insere um valor bruto no buffer
+	for(i=0; (i<NUM_RSSI_ELEM) && (i<raw_rssi_buf.cnt);i++)
+		avg_rssi += (int16_t)raw_rssi_buf.array[i];											//Soma até encontrar um zero ou se chegar ao final do array
+	avg_rssi /= i;																			//guarda o valor medio do buffer
+	max_rssi = rssi;
+	if(avg_rssi > max_rssi)
+		max_rssi=(int8_t)avg_rssi;
+	if(raw_rssi_buf.cnt>=NUM_RSSI_ELEM)
+		read_elem(&raw_rssi_buf, &tmp, NUM_RSSI_ELEM);
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	return max_rssi;
+}
+
+
+
+void rssi_process(int8_t rssi)
+{
+	int8_t tmp;
+	uint8_t i;
+	////////////////////////////////////////////MEDIA RSSI////////////////////////////////////////////////////////////////////////////////////
+	avg_rssi=0;
+	insert_elem(&raw_rssi_buf, rssi, NUM_RSSI_ELEM);										//Insere um valor bruto no buffer
+	for(i=0; (i<NUM_RSSI_ELEM) && (i<raw_rssi_buf.cnt);i++)
+		avg_rssi += (int16_t)raw_rssi_buf.array[i];											//Soma até encontrar um zero ou se chegar ao final do array
+	avg_rssi /= i;																			//guarda o valor medio do buffer
+	max_rssi = rssi;
+	if(avg_rssi > max_rssi)
+		max_rssi=(int8_t)avg_rssi;
+	if(raw_rssi_buf.cnt>=NUM_RSSI_ELEM)
+		read_elem(&raw_rssi_buf, &tmp, NUM_RSSI_ELEM);
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	timer_safety_process_stop();
+	if(max_rssi >= RSSI_THRESHOLD_SAFETY)
+	{
+		timer_safety_process_start(6*MAX_CONN_INTERVAL_DEFAULT_MS);
+		delta_rssi=abs(max_rssi-RSSI_THRESHOLD_SAFETY+1);
+	}
+	else if(max_rssi > my_ble.safety_mode.alarm_thres)
+	{
+		timer_safety_process_start(3*MAX_CONN_INTERVAL_DEFAULT_MS);
+		delta_rssi=abs(max_rssi-RSSI_THRESHOLD_SAFETY);
+		tmp=abs(max_rssi-my_ble.safety_mode.alarm_thres);
+		if(delta_rssi > tmp)
+			delta_rssi = tmp;
+	}
+	else																					//Se o valor raw RSSI lido estiver fora das duas zonas.
+	{
+		delta_rssi=abs(max_rssi-my_ble.safety_mode.alarm_thres+1);
+	}
+
+	#if (UART_EN==true)
+	printf("AVG:%d, %d\n", max_rssi,my_ble.safety_mode.zone);
+	#endif
+
+}
+
+void timer_rssi_thread_handler(void * p_context)
+{
+
+	rssi_measure(raw_rssi);
+	if(my_ble.connected)
+		ble_rssi_update(&m_beep, (int8_t)max_rssi);
+
+	if(my_ble.rssi.subscribed)
+		timer_rssi_thread_start(8*MAX_CONN_INTERVAL_DEFAULT_MS);
+
+}
+
+
+void timer_sfty_far_signaling_handler(void * p_context)
+{
+	if(my_ble.connected)
+		if(my_ble.safety_mode.en)
+			if(my_ble.safety_mode.mode==SAFETY_MODE_DISC)
+			{
+				button_char_update(SAFETY_FAR_SIG);
+				timer_sfty_far_signaling_start(PERIOD_SFTY_FAR_SIGNALING_MS);				//2 min
+			}
+}
+
+
+void timer_safety_process_handler(void * p_context)
+{
+		if(my_ble.safety_mode.en)
+			if(my_ble.safety_mode.mode==SAFETY_MODE_ZONE)
+				rssi_process(raw_rssi);
+}
+
+void timer_safety_thread_handler(void * p_context)
+{
+	safety_state(m_safety_state);
+}
+
+bool config_new_delta(int8_t delta)
+{
+	uint32_t err_code;
+
+	if(my_ble.connected==false)
+		return false;
+	if(max_rssi == last_max_rssi)
+		return false;
+	last_max_rssi = max_rssi;
+	if(my_ble.rssi.en)
+	{
+		my_ble.rssi.en=false;
+		err_code = sd_ble_gap_rssi_stop(m_conn_handle);
+		APP_ERROR_CHECK(err_code);
+	}
+	my_ble.rssi.en=true;
+	err_code = sd_ble_gap_rssi_start(m_conn_handle,delta, 0);
+	APP_ERROR_CHECK(err_code);
+	return true;
+}
+
+#if (DEV_KIT==true)
+void timer_tstamp_handler(void * p_context)
+{
+	time_stamp++;
+}
+#endif
+
+
+
+void safety_state(uint8_t state)
+{
+	static uint8_t counter=0;
+	m_safety_state=state;
+	switch(state)
+	{
+		case SFT_ST_INIT:
+			break;
+		case SFT_ST_NEAR:
+			m_safety_state=SFT_ST_RUN;
+			my_ble.safety_mode.arm=true;
+			my_ble.safety_mode.zone=SAFETY_DIST_ZONE0;
+			timer_safety_thread_start(4*MAX_CONN_INTERVAL_DEFAULT_MS);
+			break;
+		case SFT_ST_FAR:
+			m_safety_state=SFT_ST_RUN;
+			my_ble.safety_mode.arm=true;
+			my_ble.safety_mode.zone=SAFETY_DIST_ZONE1;
+			timer_safety_thread_start(2*MAX_CONN_INTERVAL_DEFAULT_MS);
+			break;
+		case SFT_ST_OUT:
+			my_ble.safety_mode.zone=SAFETY_DIST_ZONE2;
+			timer_safety_thread_start(MAX_CONN_INTERVAL_DEFAULT_MS);
+			#if (UART_EN==true)
+			printf("ESTOU FORA!\n");
+			#endif
+			counter++;
+			if(counter>=(4600/MAX_CONN_INTERVAL_DEFAULT_MS))
+				m_safety_state=SFT_ST_ALARM;
+			if(my_ble.connected)
+				if(raw_rssi>my_ble.safety_mode.alarm_thres)
+					m_safety_state=SFT_ST_RUN;
+			break;
+
+		case SFT_ST_ALARM:
+			safety_mode_alarm();
+			m_safety_state=SFT_ST_OFF;
+			timer_safety_thread_start(4*MAX_CONN_INTERVAL_DEFAULT_MS);
+			break;
+		case SFT_ST_REARM:
+			timer_safety_thread_start(4*MAX_CONN_INTERVAL_DEFAULT_MS);
+			if(max_rssi>RSSI_THRESHOLD_SAFETY)
+				m_safety_state=SFT_ST_NEAR;
+			if(my_ble.connected==false)
+				m_safety_state=SFT_ST_OFF;
+			break;
+
+		case SFT_ST_RUN:
+			#if (UART_EN==true)
+			printf("ENVIO RSSI ---------------------------> %lu ms\n", time_stamp);
+			time_stamp=0;
+			#endif
+			counter=0;
+			if(max_rssi>RSSI_THRESHOLD_SAFETY)													//Se estiver no centro
+			{
+				my_ble.safety_mode.zone=SAFETY_DIST_ZONE0;
+				if(my_ble.connected)
+					ble_button_level_update(&m_beep, (uint8_t)max_rssi);
+				timer_safety_thread_start(2*MAX_CONN_INTERVAL_DEFAULT_MS);
+			}
+			else
+			{
+				if(max_rssi>my_ble.safety_mode.alarm_thres)										//Se estiver no anel
+				{
+					my_ble.safety_mode.zone=SAFETY_DIST_ZONE1;
+					if(my_ble.connected)
+						ble_button_level_update(&m_beep, (uint8_t)max_rssi);
+					timer_safety_thread_start(2*MAX_CONN_INTERVAL_DEFAULT_MS);
+				}
+				else																			//Se estiver fora
+				{
+					m_safety_state=SFT_ST_OUT;
+					timer_safety_thread_start(MAX_CONN_INTERVAL_DEFAULT_MS);//-50);
+				}
+			}
+			if(my_ble.connected==false)
+				m_safety_state=SFT_ST_OUT;
+
+			if(my_ble.safety_mode.en==false)
+				m_safety_state=SFT_ST_OFF;
+			break;
+		case SFT_ST_OFF:
+			my_ble.safety_mode.en=false;														//É reactivado pela aplicação
+
+			break;
+		default:
+			break;
+	}
+
+}
+
+
+bool ble_act_scan_add_is_present(ble_gap_addr_t add_to_check)
+{
+	uint8_t i=0;
+	for(i=0;i<MAX_ACT_SCAN_ADD;i++)
+	{
+		if(!memcmp(addr_auth[i].addr,add_to_check.addr,6))
+			return true;
+	}
+	return false;
+}
+
+
+

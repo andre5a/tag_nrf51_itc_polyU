@@ -1,0 +1,42 @@
+/* Copyright (c) 2012 Nordic Semiconductor. All Rights Reserved.
+ *
+ * The information contained herein is property of Nordic Semiconductor ASA.
+ * Terms and conditions of usage are described in detail in NORDIC
+ * SEMICONDUCTOR STANDARD SOFTWARE LICENSE AGREEMENT.
+ *
+ * Licensees are granted free, non-transferable use of the information. NO
+ * WARRANTY of ANY KIND is provided. This heading must NOT be removed from
+ * the file.
+ *
+ */
+
+/** @file
+ *
+  */
+#include "mainfile.h"
+
+
+
+int main(void)
+{
+	init();							//Init do sistema
+	#if (DEV_KIT==true)
+	timer_tstamp_stop();			//Timer usado para testes/debug
+	timer_tstamp_start(1);
+	#endif
+	// Enter main loop.
+	while(true)						//Loop principal
+    {
+		/*Apenas o Regulador está activo
+		 * Problemas na concepção da board não permitem activar o DC-DC
+		 * Para activar DCDC definir em lapa_board.h
+		 * #define DC_DC_EN						(true)
+		 * */
+    	power_manage_loop();		//Gestão energética do sistema
+    }
+}
+
+
+
+
+

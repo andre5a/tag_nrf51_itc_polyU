@@ -1,0 +1,376 @@
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
+#include "nordic_common.h"
+#include "nrf.h"
+#include "nrf_soc.h"
+#include "nrf_gpio.h"
+#include "lapa_board.h"
+#include "app_button.h"
+#include "ble_hci.h"
+#include "app_error.h"
+#include "softdevice_handler.h"
+
+#include "timers.h"
+#include "pm.h"
+#include "ble_beep.h"
+
+#include "bluetooth.h"
+
+#include "sound.h"
+#include "flash.h"
+#include "button.h"
+
+
+#define BUTTON_NO_PRESS_CHAR_DATA		0x00
+#define BUTTON_SHORT_PRESS_CHAR_DATA	0x10
+#define BUTTON_LONG_PRESS_CHAR_DATA		0x20
+#define BUTTON_DOUBLE_PRESS_CHAR_DATA	0x30
+#define BUTTON_SAFETY_FAR_CHAR_DATA		0x40
+
+
+
+static uint8_t 						m_button_st=BUTTON_INIT;
+static uint16_t 					button_tout=0;
+static uint16_t						button_count=0;
+
+static bool button_busy_flag=false;
+static bool button_test_subscribe_flag=false;
+
+static button_signaling_t mode_signaling=BUTTON_OFF_SIG;
+static uint8_t btn_signaling_repetitions=0;
+
+static void button_state_handler(uint8_t pin_no, uint8_t button_action);
+static const app_button_cfg_t app_buttons=   {BUTTON_1, false, NRF_GPIO_PIN_PULLUP, button_state_handler};
+void button_core(void);
+
+
+uint32_t button_char_update(button_signaling_t indicate)
+{
+	uint8_t btn_char_data;
+	MY_BLE_DEV blt_dev;
+	bluetooth_read(&blt_dev);
+	if(blt_dev.connected==false)
+		return 0;
+
+	switch(indicate)
+	{
+		case BUTTON_OFF_SIG:
+			mode_signaling=BUTTON_OFF_SIG;
+			btn_char_data=BUTTON_NO_PRESS_CHAR_DATA;
+			btn_signaling_repetitions=0;
+			ble_button_level_update(&m_beep, btn_char_data);
+			ble_extra_button_test_update(&m_extra,btn_char_data);
+			break;
+		case BUTTON_SHORT_SIG:
+			mode_signaling=BUTTON_SHORT_SIG;
+			btn_char_data=BUTTON_SHORT_PRESS_CHAR_DATA+btn_signaling_repetitions;
+			ble_extra_button_test_update(&m_extra, btn_char_data);
+			timer_button_char_update_start(MAX_CONN_INTERVAL_DEFAULT_MS);
+			if((++btn_signaling_repetitions)>=6)
+				mode_signaling=BUTTON_OFF_SIG;
+			break;
+		case BUTTON_LONG_SIG:
+			mode_signaling=BUTTON_LONG_SIG;
+			btn_char_data=BUTTON_LONG_PRESS_CHAR_DATA+btn_signaling_repetitions;
+			ble_button_level_update(&m_beep, btn_char_data);
+			ble_extra_button_test_update(&m_extra, btn_char_data);
+			timer_button_char_update_start(MAX_CONN_INTERVAL_DEFAULT_MS);
+			if((++btn_signaling_repetitions)>=6)
+				mode_signaling=BUTTON_OFF_SIG;
+			break;
+		case BUTTON_DOUBLE_SIG:
+			mode_signaling=BUTTON_DOUBLE_SIG;
+			btn_char_data=BUTTON_DOUBLE_PRESS_CHAR_DATA+btn_signaling_repetitions;
+			ble_extra_button_test_update(&m_extra, btn_char_data);
+			timer_button_char_update_start(MAX_CONN_INTERVAL_DEFAULT_MS);
+			if((++btn_signaling_repetitions)>=6)
+				mode_signaling=BUTTON_OFF_SIG;
+			break;
+		case SAFETY_FAR_SIG:
+			mode_signaling=SAFETY_FAR_SIG;
+			btn_char_data=BUTTON_SAFETY_FAR_CHAR_DATA+btn_signaling_repetitions;
+			ble_button_level_update(&m_beep, btn_char_data);
+			//ble_extra_button_test_update(&m_extra, btn_char_data);
+			timer_button_char_update_start(MAX_CONN_INTERVAL_DEFAULT_MS);
+			if((++btn_signaling_repetitions)>=0)//6)
+				mode_signaling=BUTTON_OFF_SIG;
+			break;
+		default:
+
+			break;
+	}
+
+
+	return 0;
+}
+
+
+
+void timer_button_char_update_handler(void * p_context)
+{
+		button_char_update(mode_signaling);
+}
+
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void button_state_handler(uint8_t pin_no, uint8_t button_action)
+{
+	if (button_action == APP_BUTTON_PUSH)
+	{
+		if(button_busy()==false)
+		{
+			#if (UART_EN==true)
+			printf("APP_BUTTON_PUSH\n");
+			#endif
+			button_core();
+		}
+		else
+		{
+			#if (UART_EN==true)
+			printf("APP_BUTTON_BUSY\n");
+			#endif
+		}
+	}
+}
+
+void button_core(void)
+{
+	switch(m_button_st)
+	{
+		case BUTTON_INIT:
+#if (UART_EN==true)
+printf("BUTTON_INIT\n");
+#endif
+m_button_st=BUTTON_INIT;
+			button_tout=0;
+			button_count=0;
+			button_busy_flag=false;
+			timer_button_state_stop();
+			if(sound_led_is_busy()==false)
+				if(!nrf_gpio_pin_read(BUTTON_1))
+				{
+
+					button_busy_flag=true;
+					timer_button_state_start(25);
+					sound_led_indication(SOUND_OFF_LED_ON,BEEP_VOL_OFF, true, 0);
+					m_button_st=BUTTON_PRESSED1_INIT;
+
+				}
+			break;
+		case BUTTON_PRESSED1_INIT:
+
+			#if (UART_EN==true)
+			printf("BUTTON_PRESSED1_INIT\n");
+			#endif
+
+			button_tout=0;
+			button_count=0;
+			m_button_st=BUTTON_PRESSED1;
+			//no break
+		case BUTTON_PRESSED1:
+			timer_button_state_start(25);
+
+			m_button_st=BUTTON_WAIT_END;
+			if(button_test_is_subscribe())
+				m_button_st=BUTTON_UNPRESSED_INIT;
+			if(!nrf_gpio_pin_read(BUTTON_1))
+			{
+				m_button_st=BUTTON_PRESSED1;
+				if((++button_count)>=BUTTON_LONG_TIME_PRESSED)
+				{
+					sound_led_indication(SOUND_OFF_LED_OFF,BEEP_VOL_OFF, false, 0);
+					m_button_st=BUTTON_WAIT_END;
+					button_long_press_evt();
+				}
+			}
+			else
+				sound_led_indication(SOUND_OFF_LED_OFF,BEEP_VOL_OFF, false, 0);
+
+			break;
+		case BUTTON_UNPRESSED_INIT:
+			button_tout=0;
+			button_count=0;
+			m_button_st=BUTTON_UNPRESSED;
+			//no break
+		case BUTTON_UNPRESSED:
+			timer_button_state_start(25);
+			m_button_st=BUTTON_PRESSED2_INIT;
+			if(nrf_gpio_pin_read(BUTTON_1))
+			{
+				m_button_st=BUTTON_UNPRESSED;
+				if((++button_count)>=15)
+				{
+					m_button_st=BUTTON_WAIT_END;
+					button_short_press_evt();
+				}
+			}
+			break;
+		case BUTTON_PRESSED2_INIT:
+			button_tout=0;
+			button_count=0;
+			m_button_st=BUTTON_PRESSED2;
+			//no break
+		case BUTTON_PRESSED2:
+			timer_button_state_start(25);
+			m_button_st=BUTTON_WAIT_END;
+			button_double_press_evt();
+			break;
+		case BUTTON_WAIT_END:
+			timer_button_state_start(25);
+			if(nrf_gpio_pin_read(BUTTON_1))
+				m_button_st=BUTTON_INIT;
+			break;
+		default:
+			m_button_st=BUTTON_INIT;
+
+			break;
+	}
+
+
+}
+
+void timer_button_state_handler(void * p_context)
+{
+	button_core();
+}
+
+
+bool button_busy(void)
+{
+	if(button_busy_flag)
+		return true;
+	return false;
+}
+
+
+
+
+void button_short_press_evt(void)
+{
+	MY_BLE_DEV blt_dev;
+	DEVICE lapa;
+	flash_read_setup(&lapa);
+	bluetooth_read(&blt_dev);
+	#if (UART_EN==true)
+	printf("Button: short press\r\n");
+	#endif
+	if(blt_dev.connected==true)
+		button_char_update(BUTTON_SHORT_SIG);
+	switch(lapa.state)
+	{
+		case STATE_LAPA_POFF:
+			if(blt_dev.connected==false)
+			{
+				timer_poff_stop();
+				timer_poff_start(POFF_DEFAULT_TIMOUT);
+				#if (UART_EN==true)
+				printf("timer_poff_reset\r\n");
+				#endif
+			}
+		break;
+		default:
+		break;
+
+	}
+}
+
+void button_long_press_evt(void)
+{
+
+	MY_BLE_DEV blt_dev;
+	DEVICE lapa;
+	flash_read_setup(&lapa);
+	bluetooth_read(&blt_dev);
+
+	if((blt_dev.connected==true) && (blt_dev.authenticated_user==true))
+	{
+		button_char_update(BUTTON_LONG_SIG);
+		sound_led_indication(SOUND_LED_CONNECTED,BEEP_VOL_OFF, true, 10);
+	}
+	else
+	{
+		if(blt_dev.connected==false)
+			button_adv_set();
+		sound_led_indication(SOUND_LED_ERROR,BEEP_VOL_3, false, 0);
+	}
+
+	switch(lapa.state)
+	{
+		case STATE_LAPA_POFF:
+			if(blt_dev.connected==false)
+			{
+				timer_poff_stop();
+				timer_poff_start(POFF_DEFAULT_TIMOUT);
+				#if (UART_EN==true)
+				printf("timer_poff_reset\r\n");
+				#endif
+			}
+		break;
+		default:
+		break;
+
+	}
+
+	#if (UART_EN==true)
+	printf("Button: long press\r\n");
+	#endif
+
+}
+void button_double_press_evt(void)
+{
+	MY_BLE_DEV blt_dev;
+	DEVICE lapa;
+	flash_read_setup(&lapa);
+
+	bluetooth_read(&blt_dev);
+	if(blt_dev.connected==true)
+		button_char_update(BUTTON_DOUBLE_SIG);
+
+	switch(lapa.state)
+	{
+		case STATE_LAPA_POFF:
+			if(blt_dev.connected==false)
+			{
+				timer_poff_stop();
+				timer_poff_start(POFF_DEFAULT_TIMOUT);
+				#if (UART_EN==true)
+				printf("timer_poff_reset\r\n");
+				#endif
+			}
+		break;
+		default:
+		break;
+
+	}
+
+	#if (UART_EN==true)
+	printf("Button: double press\r\n");
+	#endif
+
+}
+
+
+void button_init(void)
+{
+   uint32_t err_code = app_button_init((app_button_cfg_t *)&app_buttons,1, 5);
+
+    if (err_code == NRF_SUCCESS)
+        err_code = app_button_enable();
+}
+
+
+bool button_test_is_subscribe(void)
+{
+	if(button_test_subscribe_flag)
+		return true;
+	return false;
+}
+
+void button_test_subscribe_set(bool flag)
+{
+	button_test_subscribe_flag=flag;
+}

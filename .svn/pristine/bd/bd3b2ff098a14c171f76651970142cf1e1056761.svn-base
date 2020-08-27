@@ -1,0 +1,129 @@
+/* Copyright (c) 2012 Nordic Semiconductor. All Rights Reserved.
+ *
+ * The information contained herein is property of Nordic Semiconductor ASA.
+ * Terms and conditions of usage are described in detail in NORDIC
+ * SEMICONDUCTOR STANDARD SOFTWARE LICENSE AGREEMENT.
+ *
+ * Licensees are granted free, non-transferable use of the information. NO
+ * WARRANTY of ANY KIND is provided. This heading must NOT be removed from
+ * the file.
+ *
+ */
+
+
+#ifndef BLE_EXTRA_H__
+#define BLE_EXTRA_H__
+
+#define UUID_SERV_EXTRA			 								0x1601													/**< Proprietary UUID for local service. */
+#define UUID_CHAR_ADV_SLOW_INTERVAL			 					0x1531													/**< Proprietary UUID for local characteristic. */
+#define UUID_CHAR_MAX_CONNECTION_INTERVAL					 	0x1532													/**< Proprietary UUID for local characteristic. */
+#define UUID_CHAR_SETTINGS_TX_POWER								0x1533													/**< Proprietary UUID for local characteristic. */
+#define UUID_CHAR_SETTINGS_CONNECTION_MODE						0x1534													/**< Proprietary UUID for local characteristic. */
+#define UUID_CHAR_EXTRA_BUTTON_TEST								0x1535													/**< Proprietary UUID for local characteristic. */
+#define UUID_CHAR_BOOTLOADER					 				0x1536													/**< Proprietary UUID for local characteristic. */
+
+typedef enum
+{
+		CHAR_BOOTLOADER=0,
+		CHAR_ADV_SLOW_INTERVAL=1,
+		CHAR_MAX_CONN_INTERVAL=2,
+		CHAR_TX_POWER=3,
+		CHAR_CONNECTION_MODE=4,
+		CHAR_BUTTON_TEST_ENABLED=5,
+		CHAR_BUTTON_TEST_DISABLED=6
+	
+} ble_extra_evt_type_t;
+
+/**@brief Battery Service event. */
+typedef struct
+{
+	ble_extra_evt_type_t evt_type;                                  /**< Type of event. */
+	
+		uint16_t adv_interval_slow;
+		uint16_t max_conn_interval_default;
+		uint8_t tx_power_level;                            /**< New TX Power value. */
+		uint16_t max_connection_interval;            /**< New Max Connection Interval value. */  
+} ble_extra_evt_t;
+
+// Forward declaration of the ble_extra_t type. 
+typedef struct ble_extra_s ble_extra_t;
+
+/**@brief Battery Service event handler type. */
+typedef void (*ble_extra_evt_handler_t) (ble_extra_t * p_extra, ble_extra_evt_t * p_evt);
+
+/**@brief Battery Service init structure. This contains all options and data needed for
+ *        initialization of the service.*/
+typedef struct
+{
+	ble_extra_evt_handler_t   				evt_handler;                    /**< Event handler to be called for handling events in the Battery Service. */
+    bool                       				support_notification;           /**< TRUE if notification of Battery Level measurement is supported. */
+    ble_srv_report_ref_t *     				p_report_ref;                   /**< If not NULL, a Report Reference descriptor with the specified value will be added to the Battery Level characteristic */
+    ble_gap_conn_sec_mode_t    				battery_level_report_read_perm; /**< Initial security level for battery report read attribute */
+	uint16_t               					initial_advslow_interval;   		/**< Initial value of the Advertising Interval Slow characteristic (in multiple of 0.625ms). */
+	uint16_t 								initial_max_connection_interval_default;
+	int8_t                  				initial_tx_power_level;   		/**< Initial value of the TX Power Level characteristic (in dBm). */
+	uint32_t								initial_connection_mode;		/**< New Advertising Slow Timeout value. */
+	ble_srv_cccd_security_mode_t  			button_char_attr_md;
+	ble_gap_conn_sec_mode_t       			button_report_read_perm;
+	uint16_t 								initial_button_test;
+
+} ble_extra_init_t;
+
+/**@brief Extra Service structure. This contains various status information for the service. */
+typedef struct ble_extra_s
+{
+	ble_extra_evt_handler_t     evt_handler;                    /**< Event handler to be called for handling events in the Battery Service. */
+    uint16_t                    service_handle;                 /**< Handle of Battery Service (as provided by the BLE stack). */
+    uint16_t                    report_ref_handle;              /**< Handle of the Report Reference descriptor. */
+    uint16_t                    battery_level_last;             /**< Last Battery Level measurement passed to the Battery Service. */
+    uint16_t                    conn_handle;                    /**< Handle of the current connection (as provided by the BLE stack, is BLE_CONN_HANDLE_INVALID if not in a connection). */
+    bool                        is_notification_supported;      /**< TRUE if notification of Battery Level is supported. */
+	ble_gatts_char_handles_t	dfu_lapa_bootloader_handles;
+	ble_gatts_char_handles_t 	ble_extra_advslow_interval_handles;
+	ble_gatts_char_handles_t 	ble_extra_max_connection_interval_default_handles;
+	ble_gatts_char_handles_t 	ble_extra_txpower_handles;
+	ble_gatts_char_handles_t  	ble_extra_connection_mode_handles;      /**< Advertising Timeout Slow Handles related to the BLE Settings characteristic. */
+	ble_gatts_char_handles_t 	ble_extra_button_test_handles;
+    int8_t                    	button_last;
+
+} ble_extra_t;
+
+extern ble_extra_t    m_extra;
+/**@brief Function for initializing the Battery Service.
+ *
+ * @param[out]  p_bas       Battery Service structure. This structure will have to be supplied by
+ *                          the application. It will be initialized by this function, and will later
+ *                          be used to identify this particular service instance.
+ * @param[in]   p_bas_init  Information needed to initialize the service.
+ *
+ * @return      NRF_SUCCESS on successful initialization of service, otherwise an error code.
+ */
+ uint32_t ble_extra_init(ble_extra_t * p_extra, const ble_extra_init_t * p_extra_init);
+
+/**@brief Function for handling the Application's BLE Stack events.
+ *
+ * @details Handles all events from the BLE stack of interest to the Battery Service.
+ *
+ * @note For the requirements in the BAS specification to be fulfilled,
+ *       ble_bas_battery_level_update() must be called upon reconnection if the
+ *       battery level has changed while the service has been disconnected from a bonded
+ *       client.
+ *
+ * @param[in]   p_bas      Battery Service structure.
+ * @param[in]   p_ble_evt  Event received from the BLE stack.
+ */
+void ble_extra_on_ble_evt(ble_extra_t * p_extra, ble_evt_t * p_ble_evt);
+
+uint32_t ble_extra_adv_interval_slow_set(ble_extra_t * p_extra, uint16_t adv_interval_slow);
+
+uint32_t ble_extra_max_conn_interval_default_set(ble_extra_t * p_extra, uint16_t max_conn_interval);
+
+uint32_t ble_extra_tx_power_level_set(ble_extra_t * p_extra, uint8_t tx_power_level);
+
+uint32_t ble_extra_connection_mode_set(ble_extra_t * p_extra, uint32_t connection_mode);
+
+uint32_t ble_extra_button_test_update(ble_extra_t * p_extras, uint8_t button_test);
+
+#endif // BLE_BAS_H__
+
+/** @} */

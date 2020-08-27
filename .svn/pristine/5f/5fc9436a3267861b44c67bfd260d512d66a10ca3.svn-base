@@ -1,0 +1,359 @@
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <float.h>
+#include <stdbool.h>
+
+#include "lapa_board.h"
+//#include "state_machine.h"
+#include "nordic_common.h"
+#include "nrf.h"
+#include "nrf_pwm.h"
+#include "pwm.h"
+#include "nrf_gpio.h"
+#include "ble_beep.h"
+#include "timers.h"
+#include "uart.h"
+#include "flash.h"
+#include "sound.h"
+
+
+static uint8_t beep_state_index=0;
+static sound_led_indication_t m_indication=SOUND_OFF_LED_OFF;
+static uint16_t m_repetition=0;
+static bool m_led=false;
+static sound_volume_t m_volume=BEEP_VOL_OFF;
+
+
+void beep_set_volume(sound_volume_t vol)
+{
+	switch(vol)
+	{
+		case BEEP_VOL_OFF:
+
+			nrf_gpio_pin_clear(EN1_PIN);					//SET OFF
+			nrf_gpio_pin_clear(EN2_PIN);					//SET OFF
+			nrf_pwm_set_enabled(false);
+		    apply_pan73_workaround(PWM_TIMER, false);
+		    PWM_TIMER->TASKS_STOP = 1;
+			break;
+		case BEEP_VOL_1:
+		    apply_pan73_workaround(PWM_TIMER, true);
+		    PWM_TIMER->TASKS_START = 1;
+			nrf_gpio_pin_clear(EN1_PIN);					//SET ON
+			nrf_gpio_pin_set(EN2_PIN);					//SET ON
+			nrf_pwm_set_enabled(true);
+			break;
+		case BEEP_VOL_2:
+		    apply_pan73_workaround(PWM_TIMER, true);
+		    PWM_TIMER->TASKS_START = 1;
+			nrf_gpio_pin_set(EN1_PIN);					//SET ON
+			nrf_gpio_pin_clear(EN2_PIN);					//SET OFF
+			nrf_pwm_set_enabled(true);
+			break;
+
+		case BEEP_VOL_3:
+		    apply_pan73_workaround(PWM_TIMER, true);
+		    PWM_TIMER->TASKS_START = 1;
+			nrf_gpio_pin_set(EN1_PIN);					//SET ON
+			nrf_gpio_pin_set(EN2_PIN);					//SET ON
+			nrf_pwm_set_enabled(true);
+			break;
+		default:
+			nrf_gpio_pin_clear(EN1_PIN);					//SET OFF
+			nrf_gpio_pin_clear(EN2_PIN);					//SET OFF
+			nrf_pwm_set_enabled(false);
+		    apply_pan73_workaround(PWM_TIMER, false);
+		    PWM_TIMER->TASKS_STOP = 1;
+			break;
+
+	}
+
+}
+
+
+void timer_beep_handler(void * p_context)
+{
+   UNUSED_PARAMETER(p_context);
+   sound_led_indication(m_indication,m_volume, m_led, m_repetition);
+
+}
+
+
+uint32_t sound_led_indication(sound_led_indication_t indication,sound_volume_t vol, bool led_on, uint16_t nrepetitions)
+{
+
+	uint32_t err_code   = NRF_SUCCESS;
+	switch(indication)
+	{
+		case SOUND_LED_INIT:
+			beep_state_index=0;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			m_indication=SOUND_LED_INIT_RUN;
+			//no break
+
+		case SOUND_LED_INIT_RUN:
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			beep_set_volume(BEEP_VOL_OFF);
+			if(beep_state_index<MELODY_INIT_SIZE)
+			{
+				if(melody_init[beep_state_index].frequency_hz>0)
+				{
+					beep_set_volume(vol);
+					set_frequency_and_duty_cycle((uint32_t)(melody_init[beep_state_index].frequency_hz+0.5f), 50);
+				}
+				else
+				{
+					if(led_on)
+						nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				}
+				#if (UART_EN==true)
+				printf((const char *)"SND INIT %u, %.2fHz\n",beep_state_index,melody_init[beep_state_index].frequency_hz);
+				#endif
+				timer_beep_start(melody_init[beep_state_index].duration_ms);
+				beep_state_index++;
+			}
+			else
+			{
+				timer_beep_start(500);
+				if(led_on)
+					nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				m_indication=SOUND_OFF_LED_OFF;
+				if(m_repetition>0)
+					m_repetition--;
+				if(m_repetition>0)
+					m_indication=SOUND_LED_INIT_RUN;
+
+			}
+			break;
+
+		case SOUND_LED_ERROR:
+			beep_state_index=0;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			m_indication=SOUND_LED_ERROR_RUN;
+			//no break
+		case SOUND_LED_ERROR_RUN:
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			beep_set_volume(BEEP_VOL_OFF);
+			if(beep_state_index<MELODY_ERROR_SIZE)
+			{
+				if(melody_error[beep_state_index].frequency_hz>0)
+				{
+					beep_set_volume(vol);
+					set_frequency_and_duty_cycle((uint32_t)(melody_error[beep_state_index].frequency_hz+0.5f), 50);
+				}
+				#if (UART_EN==true)
+				printf((const char *)"SND ERROR %u, %.2fHz\n",beep_state_index,melody_error[beep_state_index].frequency_hz);
+				#endif
+				timer_beep_start(melody_error[beep_state_index].duration_ms);
+				beep_state_index++;
+			}
+			else
+			{
+				timer_beep_start(500);
+				if(led_on)
+					nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				m_indication=SOUND_OFF_LED_OFF;
+				if(m_repetition>0)
+					m_repetition--;
+				if(m_repetition>0)
+					m_indication=SOUND_LED_ERROR_RUN;
+					beep_state_index=0;
+
+			}
+			break;
+
+		case SOUND_LED_FOUNDIT:
+			beep_state_index=0;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			m_indication=SOUND_LED_FOUNDIT_RUN;
+			//no break
+
+		case SOUND_LED_FOUNDIT_RUN:
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			beep_set_volume(BEEP_VOL_OFF);
+			if(beep_state_index<MELODY_FOUNDIT2_SIZE)
+			{
+				if(melody_foundit2[beep_state_index].frequency_hz>0)
+				{
+					beep_set_volume(vol);
+					set_frequency_and_duty_cycle((uint32_t)(melody_foundit2[beep_state_index].frequency_hz +0.5f), 50);
+				}
+				else
+					if(led_on)
+							nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+
+				#if (UART_EN==true)
+				printf("SND FOUNDIT %u, %.2fHz\n",beep_state_index,melody_foundit2[beep_state_index].frequency_hz);
+				#endif
+				timer_beep_start((uint32_t)(melody_foundit2[beep_state_index].duration_ms));
+				beep_state_index++;
+			}
+			else
+			{
+
+				timer_beep_start(500);
+				if(led_on)
+					nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				m_indication=SOUND_OFF_LED_OFF;
+				if(m_repetition>0)
+					m_repetition--;
+				if(m_repetition>0)
+				m_indication=SOUND_LED_FOUNDIT_RUN;
+				beep_state_index=0;
+
+			}
+
+			break;
+
+
+		case SOUND_LED_CONNECTED:
+			beep_state_index=0;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			m_indication=SOUND_LED_CONNECTED_RUN;
+			//no break
+		case SOUND_LED_CONNECTED_RUN:
+			beep_set_volume(BEEP_VOL_OFF);
+			timer_beep_start(500);
+			if(led_on)
+				nrf_gpio_pin_toggle(LED_PIN);					//SET_LED_ON
+			m_indication=SOUND_OFF_LED_OFF;
+			if(m_repetition>0)
+				m_repetition--;
+			if(m_repetition>0)
+			m_indication=SOUND_LED_CONNECTED_RUN;
+			beep_state_index=0;
+			break;
+		case SOUND_OFF_LED_ON:
+			beep_state_index=0;
+			m_indication=indication;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+			beep_set_volume(BEEP_VOL_OFF);
+			//timer_beep_stop();
+			break;
+
+		case SOUND_OFF_LED_OFF:
+			beep_state_index=0;
+			m_indication=SOUND_OFF_LED_OFF;
+			m_repetition=0;
+			m_volume=vol;
+			m_led=led_on;
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			beep_set_volume(BEEP_VOL_OFF);
+		break;
+		case SOUND_LED_TEST:
+			beep_state_index=0;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			m_indication=SOUND_LED_TEST_RUN;
+			//no break
+		case SOUND_LED_TEST_RUN:
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			beep_set_volume(BEEP_VOL_OFF);
+			if(beep_state_index<MELODY_TEST_SIZE)
+			{
+				if(melody_test[beep_state_index].frequency_hz>0)
+				{
+					beep_set_volume(vol);
+					set_frequency_and_duty_cycle((uint32_t)(melody_test[beep_state_index].frequency_hz+0.5f), 50);
+				}
+				else
+				{
+					if(led_on)
+						nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				}
+				#if (UART_EN==true)
+				printf((const char *)"SND INIT %u, %.2fHz\n",beep_state_index,melody_test[beep_state_index].frequency_hz);
+				#endif
+				timer_beep_start(melody_test[beep_state_index].duration_ms);
+				beep_state_index++;
+			}
+			else
+			{
+				timer_beep_start(500);
+				if(led_on)
+					nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				m_indication=SOUND_OFF_LED_OFF;
+				if(m_repetition>0)
+					m_repetition--;
+				if(m_repetition>0)
+					m_indication=SOUND_LED_TEST_RUN;
+
+			}
+			break;
+		case SOUND_LED_SAFETY:
+			beep_state_index=0;
+			m_repetition=nrepetitions;
+			m_volume=vol;
+			m_led=led_on;
+			m_indication=SOUND_LED_SAFETY_RUN;
+			//no break
+		case SOUND_LED_SAFETY_RUN:
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			beep_set_volume(BEEP_VOL_OFF);
+			if(beep_state_index<MELODY_SAFETY_SIZE)
+			{
+				if(melody_safety[beep_state_index].frequency_hz>0)
+				{
+					beep_set_volume(vol);
+					set_frequency_and_duty_cycle((uint32_t)(melody_safety[beep_state_index].frequency_hz +0.5f), 50);
+				}
+				else
+					if(led_on)
+							nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+
+				#if (UART_EN==true)
+				printf("SND SAFETY %u, %.2fHz\n",beep_state_index,melody_safety[beep_state_index].frequency_hz);
+				#endif
+				timer_beep_start((uint32_t)(melody_safety[beep_state_index].duration_ms));
+				beep_state_index++;
+			}
+			else
+			{
+				timer_beep_start(500);
+				if(led_on)
+					nrf_gpio_pin_clear(LED_PIN);					//SET_LED_ON
+				m_indication=SOUND_OFF_LED_OFF;
+				if(m_repetition>0)
+					m_repetition--;
+				if(m_repetition>0)
+				m_indication=SOUND_LED_SAFETY_RUN;
+				beep_state_index=0;
+
+			}
+
+			break;
+		default:
+			beep_state_index=0;
+			m_indication=SOUND_OFF_LED_OFF;
+			m_repetition=0;
+			beep_set_volume(BEEP_VOL_OFF);
+			nrf_gpio_pin_set(LED_PIN);					//SET_LED_OFF
+			break;
+	}
+	return err_code;
+}
+
+
+
+bool sound_led_is_busy(void)
+{
+	if(m_indication!=SOUND_OFF_LED_OFF)
+		return true;
+	return false;
+}
+
+
+
