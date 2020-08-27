@@ -76,7 +76,7 @@ static time_t m1_time_pos=0;
 static time_t m2_time_pos=0;
 static time_t motor_timeout=0;
 
-
+/////
 enum m_states{M_INIT,M_IDLE,M_WAIT,M_RUN,M_FIN,M_PINCH,M_FAIL};
 
 enum m_states m1_cstate;
