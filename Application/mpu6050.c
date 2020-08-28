@@ -32,6 +32,18 @@
 /*lint ++flb "Enter library region" */
 
 
+
+#define SM_INIT              0
+#define SM_SETUP             1
+#define SM_IMU_CAL           2
+#define SM_IMU_LOW_PWR_ACCEL 3
+#define SM_RUN_LOW_PWR       4
+#define SM_SLEEP             5
+#define SM_IDLE              6
+#define SM_RUN               7
+#define SM_WAIT_RESET        8
+
+
 #define ADDRESS_SIGNAL_PATH_RESET (0x68U) // !<
 
 static const uint8_t expected_who_am_i = 0x68U; // !< Expected value to get from WHO_AM_I register.
@@ -188,15 +200,6 @@ void mpu6050_loop(void)
 
      time_tick++;
 
-#define SM_INIT              0
-#define SM_SETUP             1
-#define SM_IMU_CAL           2
-#define SM_IMU_LOW_PWR_ACCEL 3
-#define SM_RUN_LOW_PWR       4
-#define SM_SLEEP             5
-#define SM_IDLE              6
-#define SM_RUN               7
-#define SM_WAIT_RESET        8
 
 	switch(mpu6050_st.cstate)
 	{
