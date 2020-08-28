@@ -1,6 +1,6 @@
-OUTPUT_FILENAME := postbox_sdk11
+OUTPUT_FILENAME :itc_sdk11
 
-PROJECT_NAME := lapa_2r_final
+PROJECT_NAME := itc_polyU
 PROJECT_PATH = $(HOME)/workspace/itcx_sdk11
 target: $(PROJECT_PATH)
 SDK_PATH = $(HOME)/nRF5_SDK_11.0.0_89a8197
